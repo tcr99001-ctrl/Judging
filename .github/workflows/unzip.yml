@@ -1,0 +1,73 @@
+name: Wipe and Install (Any Zip)
+
+on:
+  push:
+    paths:
+      - '*.zip' # 루트 경로에 zip 파일이 올라오면 발동
+
+jobs:
+  wipe-and-install:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Wipe Old Files & Unzip New (Auto Detect)
+        run: |
+          # 1. 현재 경로의 .zip 파일 찾기 (가장 먼저 발견된 것 하나)
+          ZIP_FILE=$(ls *.zip 2>/dev/null | head -n 1)
+
+          if [ -n "$ZIP_FILE" ]; then
+            echo "🚨 압축 파일 감지됨: '$ZIP_FILE'"
+            echo "기존 파일 삭제를 시작합니다..."
+
+            # 2. 기존 파일 삭제 (.git, .github, 그리고 방금 찾은 zip 파일 제외)
+            # 주의: $ZIP_FILE 변수를 사용하여 해당 zip 파일이 삭제되지 않도록 함
+            find . -maxdepth 1 ! -name '.git' ! -name '.github' ! -name "$ZIP_FILE" ! -name '.' -exec rm -rf {} +
+            echo "🧹 청소 완료."
+
+            # 3. 임시 폴더에 압축 해제
+            echo "📦 '$ZIP_FILE' 압축 해제 중..."
+            mkdir temp_unzip
+            unzip -q -o "$ZIP_FILE" -d temp_unzip
+
+            # 4. 폴더 구조 평탄화 (Flatten) 로직
+            COUNT=$(ls -1 temp_unzip | wc -l)
+            FIRST_ITEM=$(ls -1 temp_unzip | head -n 1)
+            shopt -s dotglob # 숨김 파일 포함
+
+            if [ "$COUNT" -eq 1 ] && [ -d "temp_unzip/$FIRST_ITEM" ]; then
+              echo "📂 폴더 채로 압축되었군요. 내부 파일을 꺼냅니다..."
+              mv temp_unzip/"$FIRST_ITEM"/* .
+            else
+              echo "📄 파일들이 바로 압축되어 있군요. 그대로 이동합니다..."
+              mv temp_unzip/* .
+            fi
+
+            # 5. 정리
+            shopt -u dotglob
+            rm -rf temp_unzip
+            rm "$ZIP_FILE" # 다 쓴 zip 파일 삭제
+            
+            echo "✨ 배치 완료."
+          else
+            echo "❌ Zip 파일을 찾을 수 없습니다. (하위 폴더가 아닌 루트에 올려주세요)"
+            exit 1
+          fi
+
+      - name: Commit and Push
+        run: |
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          
+          git add -A
+          
+          if [ -n "$(git status --porcelain)" ]; then
+            git commit -m "Reset & Update: $ZIP_FILE 적용 완료"
+            git push origin HEAD:${{ github.ref }}
+            echo "✅ 성공적으로 교체되었습니다."
+          else
+            echo "변경사항이 없습니다."
+          fi
