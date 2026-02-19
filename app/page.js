@@ -1,614 +1,893 @@
 'use client';
-
 import React, { useState, useEffect } from 'react';
-import { initializeApp, getApps } from 'firebase/app';
-import { 
-  getFirestore, doc, setDoc, onSnapshot, collection, updateDoc, deleteDoc, getDoc 
-} from 'firebase/firestore';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { 
-  Play, Eye, EyeOff, Users, CheckCircle2, Crown, 
-  Sword, Shield, ThumbsUp, ThumbsDown, AlertCircle, 
-  Link as LinkIcon, Sparkles, Scroll, Skull, Lock, Zap,
-  ChevronRight, XCircle
-} from 'lucide-react';
+import { Scale, AlertCircle, FileText, Search, ChevronRight } from 'lucide-react';
 
-// ==================================================================
-// [필수] 사용자님의 Firebase 설정값
-// ==================================================================
-const firebaseConfig = {
-  apiKey: "AIzaSyBPd5xk9UseJf79GTZogckQmKKwwogneco",
-  authDomain: "test-4305d.firebaseapp.com",
-  projectId: "test-4305d",
-  storageBucket: "test-4305d.firebasestorage.app",
-  messagingSenderId: "402376205992",
-  appId: "1:402376205992:web:be662592fa4d5f0efb849d"
-};
-
-// --- Firebase Init ---
-let firebaseApp;
-let db;
-let auth;
-
-try {
-  if (!getApps().length) {
-    firebaseApp = initializeApp(firebaseConfig);
-  } else {
-    firebaseApp = getApps()[0];
-  }
-  db = getFirestore(firebaseApp);
-  auth = getAuth(firebaseApp);
-} catch (e) { console.error("Firebase Init Error:", e); }
-
-// --- Game Logic Constants ---
-const QUEST_RULES = {
-  5: [2, 3, 2, 3, 3],
-  6: [2, 3, 4, 3, 4],
-  7: [2, 3, 3, 4, 4], 
-  8: [3, 4, 4, 5, 5],
-  9: [3, 4, 4, 5, 5],
-  10: [3, 4, 4, 5, 5],
-};
-
-// 역할 분배 함수 (개발자 모드 고려 X - 메인 함수에서 처리)
-function distributeRoles(count) {
-  let good = [], evil = [];
-  if (count === 5) { good=['멀린','시민','시민']; evil=['암살자','모르가나']; }
-  else if (count === 6) { good=['멀린','퍼시벌','시민','시민']; evil=['암살자','모르가나']; }
-  else if (count === 7) { good=['멀린','퍼시벌','시민','시민']; evil=['암살자','모르가나','오베론']; }
-  else {
-    good=['멀린','퍼시벌','시민','시민','시민']; evil=['암살자','모르가나','미니언'];
-    while(good.length+evil.length < count) (good.length+evil.length)%2===0 ? good.push('시민') : evil.push('미니언');
-  }
-  const roles = [...good, ...evil];
-  for(let i=roles.length-1; i>0; i--){
-    const j=Math.floor(Math.random()*(i+1));
-    [roles[i], roles[j]] = [roles[j], roles[i]];
-  }
-  return roles;
-}
-
-const vibrate = () => {
-  if (typeof navigator !== 'undefined' && navigator.vibrate) {
-    navigator.vibrate(50);
+// ==================== [캐릭터 설정] ====================
+const CHARACTERS = {
+  judge: { 
+    name: "재판장", 
+    avatar: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%23374151'/%3E%3Ctext x='50' y='60' font-size='40' text-anchor='middle' fill='white'%3E⚖%3C/text%3E%3C/svg%3E",
+    color: "#6B7280"
+  },
+  prosecutor: { 
+    name: "나검사", 
+    avatar: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%23DC2626'/%3E%3Ctext x='50' y='60' font-size='40' text-anchor='middle' fill='white'%3E검%3C/text%3E%3C/svg%3E",
+    color: "#DC2626"
+  },
+  player: { 
+    name: "김변호", 
+    avatar: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%232563EB'/%3E%3Ctext x='50' y='60' font-size='40' text-anchor='middle' fill='white'%3E변%3C/text%3E%3C/svg%3E",
+    color: "#2563EB"
+  },
+  witness: { 
+    name: "최태오",
+    avatars: {
+      normal: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%2310B981'/%3E%3Ctext x='50' y='60' font-size='35' text-anchor='middle' fill='white'%3E태오%3C/text%3E%3C/svg%3E",
+      sweat: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%23FBBF24'/%3E%3Ctext x='50' y='60' font-size='35' text-anchor='middle' fill='white'%3E😰%3C/text%3E%3C/svg%3E",
+      angry: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%23EF4444'/%3E%3Ctext x='50' y='60' font-size='35' text-anchor='middle' fill='white'%3E😡%3C/text%3E%3C/svg%3E",
+      shock: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%23F59E0B'/%3E%3Ctext x='50' y='60' font-size='35' text-anchor='middle' fill='white'%3E😱%3C/text%3E%3C/svg%3E",
+      breakdown: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%23DC2626'/%3E%3Ctext x='50' y='60' font-size='35' text-anchor='middle' fill='white'%3E🤯%3C/text%3E%3C/svg%3E"
+    },
+    color: "#10B981"
+  },
+  jimin: { 
+    name: "이지민", 
+    avatar: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%238B5CF6'/%3E%3Ctext x='50' y='60' font-size='35' text-anchor='middle' fill='white'%3E지민%3C/text%3E%3C/svg%3E",
+    color: "#8B5CF6"
+  },
+  narrator: { 
+    name: "내레이션", 
+    avatar: null,
+    color: "#9CA3AF"
+  },
+  teacher: { 
+    name: "미술 선생님", 
+    avatar: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%2306B6D4'/%3E%3Ctext x='50' y='60' font-size='40' text-anchor='middle' fill='white'%3E선%3C/text%3E%3C/svg%3E",
+    color: "#06B6D4"
+  },
+  member: { 
+    name: "미술부원", 
+    avatar: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%23EC4899'/%3E%3Ctext x='50' y='60' font-size='40' text-anchor='middle' fill='white'%3E부%3C/text%3E%3C/svg%3E",
+    color: "#EC4899"
+  },
+  police: { 
+    name: "경찰", 
+    avatar: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%231F2937'/%3E%3Ctext x='50' y='60' font-size='40' text-anchor='middle' fill='white'%3E경%3C/text%3E%3C/svg%3E",
+    color: "#1F2937"
+  },
+  janitor: { 
+    name: "청소부", 
+    avatar: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%2378716C'/%3E%3Ctext x='50' y='60' font-size='40' text-anchor='middle' fill='white'%3E청%3C/text%3E%3C/svg%3E",
+    color: "#78716C"
   }
 };
 
-// --- Main Component ---
-export default function AvalonGame() {
-  const [user, setUser] = useState(null);
-  const [roomCode, setRoomCode] = useState('');
-  const [playerName, setPlayerName] = useState('');
-  const [roomData, setRoomData] = useState(null);
-  const [players, setPlayers] = useState([]);
-  const [isCardFlipped, setIsCardFlipped] = useState(false);
-  const [error, setError] = useState(null);
-  const [copyStatus, setCopyStatus] = useState(null);
-  const [isDevMode, setIsDevMode] = useState(false);
+// ==================== [증거 설정] ====================
+const ALL_EVIDENCE = [
+  { id: 'knife', name: '미술용 나이프', icon: '🔪', desc: '지문이 묻은 공용 도구.' },
+  { id: 'picture', name: '훼손된 그림', icon: '🖼️', desc: '붉은 물감으로 뒤덮인 태오의 작품.' },
+  { id: 'cctv', name: '복도 CCTV', icon: '📹', desc: '15:58~16:02 복도에 아무도 없었다.' },
+  { id: 'floor_map', name: '미술실 도면', icon: '🗺️', desc: '앞문과 뒷문 2개 출구.' },
+  { id: 'storage_photo', name: '창고 창문 사진', icon: '🪟', desc: '쇠창살로 완전히 막혀있음.' },
+  { id: 'police_report', name: '수색 보고서', icon: '👮', desc: '창고 안 아무도 없었음.' },
+  { id: 'apron', name: '지민의 앞치마', icon: '🎽', desc: '물감 한 방울 없이 깨끗.' },
+  { id: 'floor_photo', name: '현장 바닥 사진', icon: '📸', desc: '반경 2m 물감 범벅.' },
+  { id: 'stained_glove', name: '태오의 장갑', icon: '🥊', desc: '★결정적★ 붉은 물감 범벅. [태오] 이름.' },
+  { id: 'witness_statement', name: '태오 최초 진술서', icon: '📋', desc: '"복도로 도망"이라 진술.' }
+];
 
-  const isJoined = user && players.some(p => p.id === user.uid);
-  const isHost = roomData?.hostId === user?.uid;
+// ==================== [스크립트] ====================
+const FULL_SCRIPT = [
+  // 프롤로그
+  { type: 'scene', bg: 'bg-gradient-to-b from-slate-900 to-black' },
+  { type: 'talk', char: 'narrator', text: "어느 날 오후, 세화고 미술실에서 충격적인 사건이 발생했다." },
+  { type: 'scene', bg: 'bg-gradient-to-br from-red-950 to-slate-900' },
+  { type: 'talk', char: 'narrator', text: "미술부 부장 최태오의 수상작이 무참히 훼손당했다." },
+  { type: 'talk', char: 'witness', text: "내 그림이... 내 그림이!!!!", face: 'angry' },
+  { type: 'talk', char: 'narrator', text: "현장에 있던 유일한 사람, 이지민." },
+  { type: 'talk', char: 'jimin', text: "저... 정말 아니에요...", face: 'normal' },
+  { type: 'scene', bg: 'bg-gradient-to-b from-slate-900 to-slate-800' },
+  { type: 'talk', char: 'narrator', text: "3일 후, 김변호는 지민의 변호를 맡기로 했다." },
+  { type: 'talk', char: 'player', text: "걱정 마세요. 반드시 진실을 밝혀내겠습니다!" },
+  
+  // 탐정 파트 1
+  { type: 'scene', bg: 'bg-gradient-to-br from-indigo-950 to-slate-900' },
+  { type: 'talk', char: 'narrator', text: "탐정 파트 1: 충격의 현장" },
+  { type: 'talk', char: 'player', text: "(미술실... 여기서 모든 일이 벌어졌어.)" },
+  { type: 'talk', char: 'police', text: "변호사님, 아직 수사 중입니다. 증거는 나중에 법정에서 보세요." },
+  
+  { 
+    type: 'choice',
+    question: "경찰이 출입을 막고 있다.",
+    options: [
+      { text: "정중히 부탁한다", next: 'polite_ask', success: true },
+      { text: "강제로 밀고 들어간다", next: 'force_enter', success: false },
+      { text: "나중에 다시 온다", next: 'come_later', success: false }
+    ]
+  },
+  
+  { id: 'polite_ask', type: 'talk', char: 'player', text: "저는 피고인 변호사입니다. 변호 준비를 위해 현장 확인이 필요합니다." },
+  { type: 'talk', char: 'police', text: "...알겠습니다. 단, 만지지는 마세요." },
+  { type: 'talk', char: 'player', text: "(좋아, 들어갈 수 있게 됐어!)" },
+  { type: 'jump', to: 'scene1_investigate' },
+  
+  { id: 'force_enter', type: 'talk', char: 'police', text: "뭐 하시는 겁니까?! 이건 증거 인멸 방해입니다!" },
+  { type: 'talk', char: 'player', text: "(젠장... 실패했어. 다시 시도해야겠다.)" },
+  { type: 'jump', to: 'investigation_1_start' },
+  
+  { id: 'come_later', type: 'talk', char: 'player', text: "(너무 소극적이었나... 다시 시도하자.)" },
+  { type: 'jump', to: 'investigation_1_start' },
+  
+  { id: 'scene1_investigate', type: 'scene', bg: 'bg-gradient-to-br from-indigo-950 to-slate-900' },
+  { type: 'talk', char: 'player', text: "(멀리서라도 관찰해보자... 뭔가 단서가 있을 거야.)" },
+  
+  {
+    type: 'mini_game',
+    game_type: 'observation',
+    instruction: "현장을 관찰하세요",
+    items: [
+      { id: 'mess', name: '바닥 물감', result: 'floor_photo', correct: true },
+      { id: 'chair', name: '의자', result: null, correct: false },
+      { id: 'painting', name: '그림', result: 'picture', correct: true }
+    ]
+  },
+  
+  { type: 'talk', char: 'player', text: "(현장 사진을 찍었다. 반경 2m가 난장판이야...)" },
+  { type: 'scene', bg: 'bg-gradient-to-b from-gray-900 to-slate-900' },
+  { type: 'talk', char: 'jimin', text: "변호사님... 저... 정말...", face: 'normal' },
+  { type: 'talk', char: 'player', text: "(지민이가 너무 겁먹었어... 지금은 말을 못 하겠군.)" },
+  
+  // 탐정 파트 2
+  { type: 'scene', bg: 'bg-gradient-to-br from-gray-900 to-slate-900' },
+  { type: 'talk', char: 'narrator', text: "탐정 파트 2: 최초의 의심" },
+  { type: 'talk', char: 'member', text: "(...저기요, 변호사님...)" },
+  { type: 'talk', char: 'member', text: "태오 부장... 요즘 지민이만 보면 얼굴이 굳었어요." },
+  { type: 'talk', char: 'witness', text: "(...뭔가 수군대네?)", face: 'normal' },
+  { type: 'talk', char: 'member', text: "앗! 태오 부장!" },
+  { type: 'anim', name: 'run_away' },
+  
+  { type: 'scene', bg: 'bg-gradient-to-b from-slate-800 to-slate-900' },
+  { type: 'talk', char: 'player', text: "(CCTV실 문이... 잠겨있다!)" },
+  
+  {
+    type: 'choice',
+    question: "CCTV실 문이 잠겨있다.",
+    options: [
+      { text: "선생님을 찾아 부탁한다", next: 'ask_teacher', success: true },
+      { text: "문을 억지로 연다", next: 'break_door', success: false }
+    ]
+  },
+  
+  { id: 'ask_teacher', type: 'scene', bg: 'bg-gradient-to-br from-teal-950 to-slate-900' },
+  { type: 'talk', char: 'teacher', text: "아, CCTV요? 여기 있습니다." },
+  { type: 'evidence_add', id: 'cctv' },
+  { type: 'talk', char: 'player', text: "(좋아! CCTV 획득!)" },
+  { type: 'jump', to: 'investigation_2_end' },
+  
+  { id: 'break_door', type: 'talk', char: 'player', text: "(너무 위험해... 다른 방법을 찾자.)" },
+  { type: 'jump', to: 'investigation_2_start' },
+  
+  { id: 'investigation_2_end', type: 'talk', char: 'player', text: "(복도 CCTV... 아무도 없어!)" },
+  
+  // 탐정 파트 3
+  { type: 'scene', bg: 'bg-gradient-to-br from-amber-950 to-slate-900' },
+  { type: 'talk', char: 'narrator', text: "탐정 파트 3: 창고의 비밀" },
+  { type: 'talk', char: 'player', text: "(창고... 탈출 경로일까?)" },
+  
+  {
+    type: 'mini_game',
+    game_type: 'search',
+    instruction: "창고를 수색하세요",
+    attempts: 3,
+    items: [
+      { id: 'window', name: '창문', result: 'storage_photo' },
+      { id: 'report', name: '수색 보고서', result: 'police_report' }
+    ]
+  },
+  
+  { type: 'talk', char: 'player', text: "(쇠창살이... 탈출 불가능이야!)" },
+  { type: 'evidence_add', id: 'storage_photo' },
+  { type: 'evidence_add', id: 'police_report' },
+  { type: 'scene', bg: 'bg-gradient-to-br from-teal-950 to-slate-900' },
+  { type: 'talk', char: 'teacher', text: "미술실 도면이요? 여기 있습니다." },
+  { type: 'evidence_add', id: 'floor_map' },
+  
+  // 탐정 파트 4
+  { type: 'scene', bg: 'bg-gradient-to-br from-indigo-950 to-slate-900' },
+  { type: 'talk', char: 'narrator', text: "탐정 파트 4: 쓰레기통 속 진실" },
+  { type: 'talk', char: 'player', text: "(쓰레기통... 안을 뒤져볼까?)" },
+  
+  {
+    type: 'mini_game',
+    game_type: 'timing',
+    instruction: "청소부가 오기 전에 빨리!",
+    time_limit: 5,
+    result: 'stained_glove'
+  },
+  
+  { type: 'talk', char: 'player', text: "(장갑?! [태오]라는 이름이!)" },
+  { type: 'talk', char: 'janitor', text: "여기서 뭐하는 거야?!" },
+  
+  {
+    type: 'choice',
+    question: "청소부가 다가온다!",
+    options: [
+      { text: "장갑을 재빨리 숨긴다", next: 'hide_glove', success: true },
+      { text: "정직하게 말한다", next: 'tell_truth', success: false }
+    ]
+  },
+  
+  { id: 'hide_glove', type: 'talk', char: 'player', text: "볼펜을 떨어뜨려서요..." },
+  { type: 'evidence_add', id: 'stained_glove' },
+  { type: 'talk', char: 'player', text: "(증거 확보!)" },
+  { type: 'jump', to: 'investigation_4_end' },
+  
+  { id: 'tell_truth', type: 'talk', char: 'janitor', text: "경찰에 신고하겠어!" },
+  { type: 'jump', to: 'investigation_4_start' },
+  
+  { id: 'investigation_4_end', type: 'talk', char: 'witness', text: "뭘 찾으시는 거죠?", face: 'normal' },
+  { type: 'talk', char: 'player', text: "(태오가 의심하고 있어...)" },
+  
+  // 탐정 파트 5
+  { type: 'scene', bg: 'bg-gradient-to-br from-purple-950 to-slate-900' },
+  { type: 'talk', char: 'narrator', text: "탐정 파트 5: 마지막 퍼즐" },
+  { type: 'talk', char: 'player', text: "지민 양, 앞치마를 볼 수 있을까요?" },
+  { type: 'talk', char: 'jimin', text: "저... 태오 부장이...", face: 'normal' },
+  
+  {
+    type: 'choice',
+    question: "지민이가 두려워하고 있다.",
+    options: [
+      { text: "따뜻하게 격려한다", next: 'encourage', success: true },
+      { text: "강압적으로 요구한다", next: 'force_apron', success: false }
+    ]
+  },
+  
+  { id: 'encourage', type: 'talk', char: 'player', text: "제가 당신을 지킬게요. 용기를 내세요." },
+  { type: 'talk', char: 'jimin', text: "...여기... 앞치마예요.", face: 'normal' },
+  { type: 'evidence_add', id: 'apron' },
+  { type: 'jump', to: 'investigation_complete' },
+  
+  { id: 'force_apron', type: 'talk', char: 'player', text: "(너무 했군...)" },
+  { type: 'jump', to: 'investigation_5_start' },
+  
+  { id: 'investigation_complete', type: 'scene', bg: 'bg-gradient-to-b from-slate-900 to-black' },
+  { type: 'talk', char: 'narrator', text: "탐정 파트 완료" },
+  { type: 'talk', char: 'player', text: "(이제 재판에서 진실을 밝힐 시간이야!)" },
+  
+  // 재판 1
+  { type: 'scene', bg: 'bg-gradient-to-b from-slate-900 to-slate-800' },
+  { type: 'talk', char: 'narrator', text: "제1회 공판" },
+  { type: 'talk', char: 'judge', text: "재판을 시작합니다." },
+  { type: 'talk', char: 'prosecutor', text: "증거는 세 가지입니다. ① 나이프 지문, ② 목격자, ③ 스케치북!", face: 'normal' },
+  { type: 'anim', name: 'witness_enter' },
+  { type: 'talk', char: 'witness', text: "미술부 부장 최태오입니다.", face: 'normal' },
+  
+  {
+    type: 'cross_exam',
+    title: '목격 증언',
+    statements: [
+      {
+        text: "저는 4시에 앞문으로 미술실에 들어갔습니다.",
+        weakness: false,
+        press: "4시 정확히 들어갔나요?",
+        pressResponse: [
+          { type: 'talk', char: 'witness', text: "네, 시계를 봤습니다.", face: 'normal' }
+        ]
+      },
+      {
+        text: "그림이 망가져 있었고, 지민이가 나이프를 들고 있었습니다.",
+        weakness: false,
+        press: "정확히 '들고' 있었나요?",
+        pressResponse: [
+          { type: 'talk', char: 'witness', text: "옆에 떨어져 있었던 것 같네요.", face: 'sweat' }
+        ]
+      },
+      {
+        text: "지민이는 복도로 뛰어갔습니다!",
+        weakness: true,
+        contradiction: 'cctv',
+        failMsg: "복도 CCTV와 관련이 있을 것 같은데..."
+      }
+    ]
+  },
+  
+  { type: 'anim', name: 'objection' },
+  { type: 'talk', char: 'player', text: "이의 있습니다!", size: 'text-3xl', color: 'text-blue-400' },
+  { type: 'evidence_flash', id: 'cctv' },
+  { type: 'talk', char: 'player', text: "복도 CCTV를 보십시오! 15:58~16:02 사이 아무도 없었습니다!", size: 'text-2xl' },
+  { type: 'talk', char: 'prosecutor', text: "스케치북은 16:05에 발견됐습니다! CCTV가 끊긴 후입니다!", face: 'normal' },
+  { type: 'talk', char: 'player', text: "하지만 전체 CCTV를 보면 완전히 비어있습니다!" },
+  { type: 'talk', char: 'witness', text: "그, 그건...", face: 'sweat' },
+  
+  // 재판 2
+  { type: 'talk', char: 'witness', text: "복도가 아니라 뒷문으로 창고에 갔어요!", face: 'normal' },
+  
+  {
+    type: 'cross_exam',
+    title: '수정된 증언',
+    statements: [
+      {
+        text: "지민이는 뒷문으로 창고에 들어갔습니다.",
+        weakness: false,
+        press: "직접 봤나요?",
+        pressResponse: [
+          { type: 'talk', char: 'witness', text: "네! 뒷문이 열리는 걸 봤어요!", face: 'normal' }
+        ]
+      },
+      {
+        text: "창고를 열었을 땐 비어있었어요. 창문으로 탈출했을 겁니다!",
+        weakness: true,
+        contradiction: 'storage_photo',
+        failMsg: "창고 창문에 대한 증거가..."
+      }
+    ]
+  },
+  
+  { type: 'anim', name: 'objection' },
+  { type: 'talk', char: 'player', text: "불가능합니다!", size: 'text-3xl', color: 'text-red-500' },
+  { type: 'evidence_flash', id: 'storage_photo' },
+  { type: 'talk', char: 'player', text: "쇠창살로 막혀있습니다! 탈출 불가능!", size: 'text-2xl' },
+  
+  // 재판 3
+  {
+    type: 'cross_exam',
+    title: '현장 목격',
+    isFinal: true,
+    statements: [
+      {
+        text: "지민이가 나이프로 물감통을 찔렀습니다!",
+        weakness: false,
+        press: "직접 봤나요?",
+        pressResponse: [
+          { type: 'talk', char: 'witness', text: "펑 하고 터지는 걸 봤어요!", face: 'angry' }
+        ]
+      },
+      {
+        text: "지민이는 온몸에 물감을 뒤집어쓰고 웃고 있었어요!",
+        weakness: true,
+        contradiction: 'apron',
+        failMsg: "지민의 옷에 관한 증거가..."
+      }
+    ]
+  },
+  
+  { type: 'anim', name: 'objection' },
+  { type: 'talk', char: 'player', text: "온몸에 물감을 뒤집어썼다고요?!", size: 'text-4xl text-red-500' },
+  { type: 'evidence_flash', id: 'apron' },
+  { type: 'talk', char: 'player', text: "지민의 앞치마를 보십시오! 물감 한 방울도 없습니다!", size: 'text-2xl' },
+  
+  // 재판 4
+  { type: 'talk', char: 'witness', text: "저는 물감에 손도 안 댔어요!", face: 'sweat' },
+  { type: 'evidence_flash', id: 'stained_glove' },
+  { type: 'talk', char: 'player', text: "쓰레기통에서 발견된 물감 범벅 장갑! 손목에 [태오]라고 적혀있습니다!", size: 'text-3xl' },
+  { type: 'talk', char: 'witness', text: "으... 으아아아악!", face: 'breakdown' },
+  
+  // 결말
+  { type: 'anim', name: 'confetti' },
+  { type: 'talk', char: 'witness', text: "...다 제가 했어요.", face: 'breakdown' },
+  { type: 'talk', char: 'judge', text: "피고인 이지민에게 무죄를 선고합니다!", size: 'text-3xl' },
+  { type: 'talk', char: 'narrator', text: "김변호는 또 한 번 역전승을 거두었다." },
+  
+  { type: 'end', text: "THE END" }
+];
 
-  // Initial Setup
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const p = new URLSearchParams(window.location.search);
-      if(p.get('room')) setRoomCode(p.get('room').toUpperCase());
+// ==================== [게임 엔진] ====================
+function AceAttorneyGame() {
+  const [index, setIndex] = useState(0);
+  const [collectedEvidence, setCollectedEvidence] = useState([]);
+  const [currentBg, setCurrentBg] = useState('bg-gradient-to-b from-slate-900 to-black');
+  const [hp, setHp] = useState(5);
+  const [shake, setShake] = useState(false);
+  const [flash, setFlash] = useState(false);
+  const [effectText, setEffectText] = useState(null);
+  const [isEnding, setIsEnding] = useState(false);
+  
+  const [evidenceMode, setEvidenceMode] = useState(false);
+  const [pressMode, setPressMode] = useState(false);
+  const [pressIndex, setPressIndex] = useState(0);
+  const [choiceMode, setChoiceMode] = useState(false);
+  const [miniGameMode, setMiniGameMode] = useState(false);
+  const [miniGameData, setMiniGameData] = useState(null);
+  const [ceIndex, setCeIndex] = useState(0);
+  
+  const currentLine = FULL_SCRIPT[index] || {};
+  const isCE = currentLine.type === 'cross_exam';
+  const stmt = isCE ? currentLine.statements?.[ceIndex] : null;
+  const txt = pressMode && stmt?.pressResponse?.[pressIndex]?.text 
+    ? stmt.pressResponse[pressIndex].text 
+    : isCE ? stmt?.text : currentLine.text;
+  const char = (() => {
+    if (pressMode && stmt?.pressResponse?.[pressIndex]?.char) {
+      return CHARACTERS[stmt.pressResponse[pressIndex].char];
     }
-  }, []);
+    if (isCE) return CHARACTERS.witness;
+    return currentLine.char ? CHARACTERS[currentLine.char] : null;
+  })();
+  const charFace = (() => {
+    if (pressMode && stmt?.pressResponse?.[pressIndex]?.face) {
+      return stmt.pressResponse[pressIndex].face;
+    }
+    return currentLine.face || 'normal';
+  })();
 
-  useEffect(() => {
-    if(!auth) return;
-    const unsub = onAuthStateChanged(auth, u => {
-      if(u) setUser(u);
-      else signInAnonymously(auth).catch(console.error);
-    });
-    return () => unsub();
-  }, []);
+  const handleNext = () => {
+    if (evidenceMode || pressMode || choiceMode || miniGameMode || isEnding) return;
+    
+    if (isCE) {
+      setCeIndex(prev => (prev + 1) % currentLine.statements.length);
+      return;
+    }
 
-  useEffect(() => {
-    if(!user || !roomCode || roomCode.length!==4 || !db) return;
-    const unsubRoom = onSnapshot(doc(db,'rooms',roomCode), s => setRoomData(s.exists()?s.data():null));
-    const unsubPlayers = onSnapshot(collection(db,'rooms',roomCode,'players'), s => {
-      const list=[]; s.forEach(d=>list.push({id:d.id, ...d.data()}));
-      setPlayers(list);
-    });
-    return () => { unsubRoom(); unsubPlayers(); };
-  }, [user, roomCode]);
+    if (currentLine.type === 'jump') {
+      const target = FULL_SCRIPT.findIndex(l => l.id === currentLine.to);
+      setIndex(target !== -1 ? target : index + 1);
+      return;
+    }
 
-  // Presence & Cleanup
-  useEffect(() => {
-    if(!isJoined || !roomCode || !user) return;
-    const heartbeat = async () => { try { await updateDoc(doc(db,'rooms',roomCode,'players',user.uid), { lastActive: Date.now() }); } catch(e){} };
-    heartbeat();
-    const timer = setInterval(heartbeat, 5000);
-    return () => clearInterval(timer);
-  }, [isJoined, roomCode, user]);
-
-  useEffect(() => {
-    if(!isHost || !players.length) return;
-    const cleaner = setInterval(() => {
-      const now = Date.now();
-      players.forEach(async p => {
-        if(p.lastActive && now - p.lastActive > 20000) { try { await deleteDoc(doc(db,'rooms',roomCode,'players',p.id)); } catch(e){} }
-      });
-    }, 10000);
-    return () => clearInterval(cleaner);
-  }, [isHost, players, roomCode]);
-
-  // Actions
-  const handleCreate = async () => {
-    if(!playerName) return setError("이름을 입력하세요");
-    vibrate();
-    const code = Math.random().toString(36).substring(2,6).toUpperCase();
-    await setDoc(doc(db,'rooms',code), {
-      hostId: user.uid, status: 'lobby', phase: 'team_building',
-      questScores: [null,null,null,null,null], currentQuestIndex: 0,
-      leaderIndex: 0, votes: {}, questVotes: {}, currentTeam: [],
-      createdAt: Date.now()
-    });
-    await setDoc(doc(db,'rooms',code,'players',user.uid), { name: playerName, joinedAt: Date.now(), lastActive: Date.now() });
-    setRoomCode(code);
+    setIndex(prev => Math.min(prev + 1, FULL_SCRIPT.length - 1));
   };
 
-  const handleJoin = async () => {
-    if(!playerName || roomCode.length!==4) return setError("정보를 확인하세요");
-    vibrate();
-    const snap = await getDoc(doc(db,'rooms',roomCode));
-    if(!snap.exists()) return setError("방이 존재하지 않습니다");
-    await setDoc(doc(db,'rooms',roomCode,'players',user.uid), { name: playerName, joinedAt: Date.now(), lastActive: Date.now() });
+  const handleChoice = (option) => {
+    const target = FULL_SCRIPT.findIndex(l => l.id === option.next);
+    setIndex(target !== -1 ? target : index + 1);
+    setChoiceMode(false);
   };
 
-  // ★ [수정] 게임 시작 로직 (개발자 모드 버그 수정)
-  const handleStart = async () => {
-    vibrate();
-    const count = players.length;
-    let finalRoles = [];
-    let finalRules = [];
+  const handleMiniGameComplete = (success, evidenceId) => {
+    if (success && evidenceId) {
+      const ev = ALL_EVIDENCE.find(e => e.id === evidenceId);
+      if (ev && !collectedEvidence.some(e => e.id === evidenceId)) {
+        setCollectedEvidence([...collectedEvidence, ev]);
+      }
+    }
+    setMiniGameMode(false);
+    setMiniGameData(null);
+    setIndex(index + 1);
+  };
 
-    if (isDevMode) {
-      // 개발자 모드: 인원수 무관, 역할 랜덤, 퀘스트 인원 1명 고정
-      const testRolesPool = ['멀린', '암살자', '퍼시벌', '모르가나', '시민', '미니언'];
-      // 현재 인원수만큼 랜덤 역할을 뽑습니다.
-      finalRoles = Array(count).fill(null).map(() => testRolesPool[Math.floor(Math.random() * testRolesPool.length)]);
-      finalRules = [1, 1, 1, 1, 1]; // 테스트용 룰 (1명만 필요)
+  const addEvidence = (id) => {
+    const ev = ALL_EVIDENCE.find(e => e.id === id);
+    if (ev && !collectedEvidence.some(e => e.id === id)) {
+      setCollectedEvidence([...collectedEvidence, ev]);
+      setFlash(true);
+      setTimeout(() => setFlash(false), 300);
+    }
+  };
+
+  const handlePress = () => {
+    if (!isCE || !stmt?.pressResponse) {
+      return;
+    }
+    setPressMode(true);
+    setPressIndex(0);
+  };
+
+  const handlePressNext = () => {
+    if (!stmt?.pressResponse) return;
+    if (pressIndex < stmt.pressResponse.length - 1) {
+      setPressIndex(pressIndex + 1);
     } else {
-      if (count < 5) return setError("최소 5명이 필요합니다.");
-      finalRoles = distributeRoles(count);
-      finalRules = QUEST_RULES[count];
+      setPressMode(false);
+      setPressIndex(0);
     }
+  };
 
-    const updates = players.map((p,i) => {
-      const r = finalRoles[i];
-      const evil = ['암살자','모르가나','오베론','미니언','모드레드'].includes(r);
-      return updateDoc(doc(db,'rooms',roomCode,'players',p.id), { role:r, isEvil:evil });
-    });
-    await Promise.all(updates);
+  const presentEvidence = (id) => {
+    if (!isCE || !stmt) return;
     
-    await updateDoc(doc(db,'rooms',roomCode), { 
-      status: 'playing', 
-      questRules: finalRules, 
-      leaderIndex: 0, 
-      isDevMode: isDevMode,
-      playerCount: count // 투표 집계 시 필요하므로 저장
-    });
+    if (stmt.weakness && stmt.contradiction === id) {
+      setEffectText("OBJECTION!");
+      setShake(true);
+      setTimeout(() => {
+        setEffectText(null);
+        setShake(false);
+        setEvidenceMode(false);
+        setCeIndex(0);
+        setIndex(index + 1);
+      }, 1500);
+    } else {
+      const newHp = Math.max(0, hp - 1);
+      setHp(newHp);
+      setShake(true);
+      setTimeout(() => setShake(false), 500);
+      if (newHp <= 0) {
+        alert("HP 0. 게임 오버!");
+        window.location.reload();
+      }
+    }
   };
 
-  const copyInviteLink = () => {
-    const inviteUrl = `${window.location.origin}?room=${roomCode}`;
-    const el = document.createElement('textarea');
-    el.value = inviteUrl;
-    document.body.appendChild(el);
-    el.select();
-    document.execCommand('copy');
-    document.body.removeChild(el);
-    setCopyStatus('link');
-    setTimeout(() => setCopyStatus(null), 2000);
-    vibrate();
-  };
-
-  const getMyData = () => {
-    if(!user || !players.length) return null;
-    const me = players.find(p=>p.id===user.uid);
-    if(!me?.role) return null;
-    let info = "";
-    const evils = players.filter(p=>p.isEvil && p.role!=='오베론' && p.role!=='모드레드').map(p=>p.name).join(', ');
-    const merlins = players.filter(p=>['멀린','모르가나'].includes(p.role)).map(p=>p.name).join(', ');
+  useEffect(() => {
+    if (!currentLine?.type) return;
     
-    if(me.role==='멀린') info=`악의 하수인: ${evils}`;
-    else if(me.role==='퍼시벌') info=`멀린 후보: ${merlins}`;
-    else if(me.isEvil && me.role!=='오베론') info=`동료 악당: ${evils}`;
-    else info="당신은 정의로운 아서 왕의 기사입니다.";
-    return { ...me, info };
-  };
-  const myData = getMyData();
+    const type = currentLine.type;
+    
+    if (type === 'scene') {
+      if (currentLine.bg) setCurrentBg(currentLine.bg);
+      setIndex(index + 1);
+    }
+    else if (type === 'evidence_add') {
+      addEvidence(currentLine.id);
+      setIndex(index + 1);
+    }
+    else if (type === 'choice') {
+      setChoiceMode(true);
+    }
+    else if (type === 'mini_game') {
+      setMiniGameMode(true);
+      setMiniGameData(currentLine);
+    }
+    else if (type === 'anim') {
+      const name = currentLine.name;
+      if (name === 'objection') {
+        setEffectText("OBJECTION!");
+        setShake(true);
+        setTimeout(() => {
+          setEffectText(null);
+          setShake(false);
+          setIndex(index + 1);
+        }, 1500);
+      } else if (name === 'witness_enter' || name === 'run_away') {
+        setFlash(true);
+        setTimeout(() => {
+          setFlash(false);
+          setIndex(index + 1);
+        }, 500);
+      } else if (name === 'confetti') {
+        setEffectText("VICTORY");
+        setTimeout(() => {
+          setEffectText(null);
+          setIndex(index + 1);
+        }, 2000);
+      } else {
+        setIndex(index + 1);
+      }
+    }
+    else if (type === 'evidence_flash') {
+      setFlash(true);
+      setTimeout(() => {
+        setFlash(false);
+        setIndex(index + 1);
+      }, 500);
+    }
+    else if (type === 'end') {
+      setIsEnding(true);
+    }
+  }, [index, currentLine?.type]);
 
-  // --- Render ---
-  if(!user) return (
-    <div className="flex h-screen flex-col items-center justify-center bg-slate-950 text-white font-sans gap-4">
-      <div className="w-12 h-12 border-4 border-slate-800 border-t-amber-500 rounded-full animate-spin"></div>
-      <p className="text-amber-500 font-bold tracking-widest text-xs uppercase animate-pulse">Connecting...</p>
-    </div>
-  );
+  if (isEnding) {
+    return (
+      <div className="h-screen w-full bg-gradient-to-br from-slate-950 via-slate-900 to-black text-white flex flex-col items-center justify-center p-8 relative overflow-hidden">
+        <div className="absolute inset-0 opacity-10">
+          <div className="absolute top-0 left-0 w-96 h-96 bg-blue-500 rounded-full blur-3xl"></div>
+          <div className="absolute bottom-0 right-0 w-96 h-96 bg-purple-500 rounded-full blur-3xl"></div>
+        </div>
+        <div className="relative z-10 text-center">
+          <Scale className="w-24 h-24 mx-auto mb-8 text-blue-400" strokeWidth={1.5} />
+          <h1 className="text-7xl font-bold mb-6 tracking-tight" style={{ fontFamily: 'Georgia, serif' }}>
+            역전의 미술실
+          </h1>
+          <div className="w-24 h-1 bg-gradient-to-r from-transparent via-blue-400 to-transparent mx-auto mb-8"></div>
+          <p className="text-xl text-gray-300 mb-12 max-w-lg mx-auto leading-relaxed" style={{ fontFamily: 'system-ui, sans-serif' }}>
+            지민이의 누명은 벗겨졌고, 진범 최태오는 처벌을 받았습니다.
+            <br/>김변호의 명성은 더욱 높아졌습니다.
+          </p>
+          <button 
+            onClick={() => window.location.reload()} 
+            className="px-10 py-4 bg-white text-black font-semibold rounded-md hover:bg-gray-100 transition-all duration-300 hover:scale-105"
+            style={{ fontFamily: 'system-ui, sans-serif' }}
+          >
+            처음부터 다시하기
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-amber-500/30 overflow-x-hidden relative">
-      
-      {/* Background */}
-      <div className="fixed inset-0 pointer-events-none">
-        <div className="absolute top-[-20%] left-[-20%] w-[800px] h-[800px] bg-indigo-900/20 rounded-full blur-[120px] animate-pulse"></div>
-        <div className="absolute bottom-[-20%] right-[-20%] w-[800px] h-[800px] bg-amber-900/10 rounded-full blur-[120px] animate-pulse delay-1000"></div>
-        <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-10"></div>
+    <div className={`h-screen w-full relative overflow-hidden select-none transition-all duration-700 ${currentBg} ${shake ? 'animate-shake' : ''}`}>
+      <style jsx global>{`
+        @import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap');
+        
+        @keyframes shake {
+          0%, 100% { transform: translate(0); }
+          25% { transform: translate(-8px, 4px); }
+          75% { transform: translate(8px, -4px); }
+        }
+        .animate-shake { animation: shake 0.25s ease-in-out 3; }
+        
+        @keyframes slideUp {
+          from { transform: translateY(100%); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
+        }
+        .animate-slide-up { animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+        
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        .animate-fade-in { animation: fadeIn 0.5s ease-out; }
+      `}</style>
+
+      {/* 배경 그라데이션 오버레이 */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent pointer-events-none"></div>
+
+      {/* HP 바 - 미니멀 디자인 */}
+      <div className="absolute top-8 left-8 z-50">
+        <div className="flex items-center gap-3 bg-black/40 backdrop-blur-md px-5 py-3 rounded-full border border-white/10">
+          <Scale className="w-5 h-5 text-blue-400" strokeWidth={2} />
+          <div className="flex gap-1.5">
+            {[...Array(5)].map((_, i) => (
+              <div 
+                key={i} 
+                className={`w-2 h-2 rounded-full transition-all duration-300 ${i < hp ? 'bg-blue-400 shadow-lg shadow-blue-400/50' : 'bg-gray-700'}`}
+              />
+            ))}
+          </div>
+        </div>
       </div>
 
-      <div className="relative mx-auto max-w-lg min-h-screen flex flex-col p-6 z-10">
-        
-        {/* Header */}
-        <header className="flex items-center justify-between mb-8">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-gradient-to-br from-amber-500 to-amber-700 rounded-lg shadow-lg shadow-amber-500/20">
-              <Sword size={24} className="text-white" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-amber-100 to-amber-500">AVALON</h1>
-              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-[0.3em]">The Resistance</p>
+      {/* 증거 카운터 */}
+      <div className="absolute top-8 right-8 z-50">
+        <div className="flex items-center gap-3 bg-black/40 backdrop-blur-md px-5 py-3 rounded-full border border-white/10">
+          <FileText className="w-5 h-5 text-amber-400" strokeWidth={2} />
+          <span className="text-sm font-semibold text-white" style={{ fontFamily: 'Inter, sans-serif' }}>
+            {collectedEvidence.length} / 10
+          </span>
+        </div>
+      </div>
+
+      {/* 특수 효과 - OBJECTION */}
+      {effectText && (
+        <div className="absolute inset-0 z-[100] flex items-center justify-center bg-gradient-to-br from-blue-600/20 to-red-600/20 backdrop-blur-sm">
+          <div className="relative">
+            <div className="absolute inset-0 bg-white/10 blur-3xl animate-pulse"></div>
+            <h1 
+              className="relative text-9xl font-bold tracking-tighter text-white drop-shadow-2xl"
+              style={{ 
+                fontFamily: 'Crimson Pro, serif',
+                textShadow: '0 0 40px rgba(59, 130, 246, 0.8), 0 0 80px rgba(59, 130, 246, 0.4)'
+              }}
+            >
+              {effectText}
+            </h1>
+          </div>
+        </div>
+      )}
+
+      {flash && (
+        <div className="absolute inset-0 z-[90] bg-white/20 pointer-events-none" 
+             style={{ animation: 'fadeIn 0.15s ease-out reverse' }}></div>
+      )}
+
+      {/* 캐릭터 표시 - 미니멀 아바타 */}
+      {char && (
+        <div className="absolute bottom-80 left-1/2 transform -translate-x-1/2 z-10 animate-fade-in">
+          <div className="relative">
+            {/* 글로우 효과 */}
+            <div 
+              className="absolute inset-0 rounded-full blur-2xl opacity-30"
+              style={{ backgroundColor: char.color }}
+            ></div>
+            {/* 아바타 */}
+            <img 
+              src={char.avatars?.[charFace] || char.avatar} 
+              alt={char.name}
+              className="relative w-32 h-32 rounded-full border-2 border-white/20 shadow-2xl"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* 심문 상태 표시 - 미니멀 */}
+      {isCE && (
+        <div className="absolute top-32 left-1/2 transform -translate-x-1/2 z-20 animate-slide-up">
+          <div className={`px-8 py-3 rounded-full border ${
+            currentLine.isFinal 
+              ? 'bg-red-950/80 border-red-500/50 text-red-200' 
+              : 'bg-blue-950/80 border-blue-500/50 text-blue-200'
+          } backdrop-blur-md`}>
+            <div className="flex items-center gap-3">
+              <AlertCircle className="w-4 h-4" strokeWidth={2} />
+              <span className="text-sm font-semibold" style={{ fontFamily: 'Inter, sans-serif' }}>
+                {currentLine.isFinal ? '최후의 증언' : currentLine.title} · {ceIndex + 1}/{currentLine.statements?.length}
+              </span>
             </div>
           </div>
-          {isJoined && roomCode && (
-            <div className="flex flex-col items-end">
-              <span className="text-[9px] font-bold text-slate-500 uppercase">Room Code</span>
-              <span className="font-mono text-xl font-black text-amber-500 tracking-wider">{roomCode}</span>
+        </div>
+      )}
+
+      {/* 대화창 - 현대적 디자인 */}
+      <div 
+        onClick={pressMode ? handlePressNext : handleNext}
+        className={`absolute bottom-0 left-0 right-0 p-8 z-30 transition-all duration-500 ${
+          evidenceMode || choiceMode || miniGameMode ? 'translate-y-full opacity-0' : 'translate-y-0 opacity-100'
+        }`}
+      >
+        <div className="max-w-5xl mx-auto">
+          {/* 캐릭터 이름 태그 */}
+          {char && (
+            <div className="mb-3 ml-4">
+              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-t-xl bg-black/60 backdrop-blur-md border-t border-x border-white/10">
+                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: char.color }}></div>
+                <span className="text-sm font-semibold text-white" style={{ fontFamily: 'Inter, sans-serif' }}>
+                  {char.name}
+                </span>
+              </div>
             </div>
           )}
-        </header>
+          
+          {/* 대화 박스 */}
+          <div className="relative bg-black/80 backdrop-blur-xl border border-white/10 rounded-2xl p-8 min-h-[160px] cursor-pointer hover:border-white/20 transition-all duration-300 group">
+            <p 
+              className={`text-xl leading-relaxed ${currentLine.color || 'text-white'} ${currentLine.size || ''}`}
+              style={{ fontFamily: 'Inter, sans-serif', fontWeight: 500 }}
+            >
+              {txt}
+            </p>
 
-        {/* Error Toast */}
-        {error && (
-          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center gap-3 animate-in slide-in-from-top-4 backdrop-blur-md">
-            <AlertCircle className="text-red-500 shrink-0" size={20} />
-            <p className="text-sm font-bold text-red-200">{error}</p>
-            <button onClick={()=>setError(null)} className="ml-auto text-red-400 hover:text-white">✕</button>
-          </div>
-        )}
-
-        {/* 1. Entrance */}
-        {!isJoined && (
-          <div className="my-auto animate-in fade-in zoom-in-95 duration-700">
-            <div className="bg-slate-900/60 backdrop-blur-xl border border-white/10 p-8 rounded-[2rem] shadow-2xl space-y-6">
-              <div className="text-center pb-4 border-b border-white/5">
-                <h2 className="text-2xl font-black text-white mb-2">원탁의 기사단</h2>
-                <p className="text-slate-400 text-sm">성스러운 임무를 수행할 준비가 되셨습니까?</p>
-              </div>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="text-xs font-bold text-slate-500 uppercase ml-2">닉네임</label>
-                  <input 
-                    value={playerName} 
-                    onChange={e=>setPlayerName(e.target.value)} 
-                    placeholder="기사님의 이름" 
-                    className="w-full mt-1 bg-black/40 border border-white/10 focus:border-amber-500/50 focus:ring-1 focus:ring-amber-500/50 rounded-xl px-5 py-4 text-lg font-bold text-white placeholder-slate-600 outline-none transition-all"
-                  />
-                </div>
-
-                {!roomCode && (
-                  <button 
-                    onClick={handleCreate} 
-                    className="w-full bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white py-4 rounded-xl font-black text-lg shadow-lg shadow-amber-900/30 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
-                  >
-                    <Sparkles size={18} /> 새로운 원정대 결성
-                  </button>
-                )}
-
-                <div className="flex gap-3">
-                  <input 
-                    value={roomCode} 
-                    onChange={e=>setRoomCode(e.target.value.toUpperCase())} 
-                    placeholder="코드" 
-                    maxLength={4}
-                    className="flex-1 bg-black/40 border border-white/10 focus:border-indigo-500 rounded-xl text-center font-mono font-black text-xl uppercase outline-none transition-all"
-                  />
-                  <button 
-                    onClick={handleJoin} 
-                    className="flex-[1.5] bg-slate-800 hover:bg-slate-700 text-white py-4 rounded-xl font-bold text-lg border border-white/5 transition-all active:scale-[0.98]"
-                  >
-                    입장하기
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 2. Lobby */}
-        {isJoined && roomData?.status === 'lobby' && (
-          <div className="flex flex-col h-full animate-in fade-in slide-in-from-bottom-8 duration-500">
-            <div className="bg-gradient-to-br from-indigo-900 to-slate-900 p-6 rounded-[2rem] border border-white/5 relative overflow-hidden mb-4 shadow-xl">
-              <div className="absolute top-0 right-0 p-4 opacity-10"><Users size={80} /></div>
-              <p className="text-indigo-300 text-xs font-bold uppercase tracking-widest mb-1">Waiting for Knights</p>
-              <h2 className="text-4xl font-black text-white">{players.length} <span className="text-xl text-slate-500">/ 10</span></h2>
-              {isDevMode && <div className="mt-2 inline-flex items-center gap-1 bg-red-500/20 text-red-400 px-2 py-0.5 rounded text-[10px] font-bold border border-red-500/30"><Zap size={10}/> DEV MODE ON</div>}
-            </div>
-
-            <div className="flex-1 flex flex-col min-h-0 bg-slate-900/40 border border-white/5 rounded-[2rem] p-4 backdrop-blur-sm">
-              <div className="flex justify-between items-center mb-4 px-2">
-                <span className="text-xs font-bold text-slate-500 uppercase">Participants</span>
-                <button onClick={copyInviteLink} className="text-xs font-bold text-amber-500 flex items-center gap-1 bg-amber-500/10 px-3 py-1.5 rounded-full hover:bg-amber-500/20 transition-colors">
-                  {copyStatus==='link' ? <CheckCircle2 size={12}/> : <LinkIcon size={12}/>} 초대 링크
+            {/* 심문 버튼 */}
+            {isCE && !pressMode && (
+              <div className="absolute -top-20 right-0 flex gap-3">
+                <button 
+                  onClick={(e) => { e.stopPropagation(); handlePress(); }}
+                  className="flex items-center gap-2 px-6 py-3 bg-blue-600/90 hover:bg-blue-500 text-white font-semibold rounded-xl backdrop-blur-sm transition-all duration-300 hover:scale-105 border border-blue-400/30"
+                  style={{ fontFamily: 'Inter, sans-serif' }}
+                >
+                  <Search className="w-5 h-5" strokeWidth={2} />
+                  <span>추궁</span>
+                </button>
+                <button 
+                  onClick={(e) => { e.stopPropagation(); setEvidenceMode(true); }}
+                  className="flex items-center gap-2 px-6 py-3 bg-amber-600/90 hover:bg-amber-500 text-white font-semibold rounded-xl backdrop-blur-sm transition-all duration-300 hover:scale-105 border border-amber-400/30"
+                  style={{ fontFamily: 'Inter, sans-serif' }}
+                >
+                  <FileText className="w-5 h-5" strokeWidth={2} />
+                  <span>증거 제시</span>
                 </button>
               </div>
-              <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
-                {players.map(p => (
-                  <div key={p.id} className="flex items-center justify-between p-3 bg-white/5 border border-white/5 rounded-xl">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-2.5 h-2.5 rounded-full ${p.id===roomData.hostId ? 'bg-amber-500 shadow-[0_0_8px_orange]' : 'bg-emerald-500'}`}></div>
-                      <span className="font-bold text-slate-200">{p.name}</span>
-                    </div>
-                    {p.id===roomData.hostId && <Crown size={14} className="text-amber-500" />}
-                  </div>
-                ))}
-              </div>
-            </div>
+            )}
 
-            <div className="mt-4 space-y-3">
-              {isHost ? (
-                <>
-                  <button 
-                    onClick={handleStart}
-                    className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white py-5 rounded-2xl font-black text-xl shadow-xl shadow-emerald-900/20 flex items-center justify-center gap-3 transition-all active:scale-[0.98]"
-                  >
-                    <Play fill="currentColor" size={20}/> 게임 시작
-                  </button>
-                  <div 
-                    onClick={() => setIsDevMode(!isDevMode)}
-                    className="text-center text-[10px] text-slate-600 font-bold uppercase tracking-widest cursor-pointer hover:text-slate-400 transition-colors"
-                  >
-                    {isDevMode ? "Dev Mode Enabled" : "Min 5 Players Required"}
-                  </div>
-                </>
-              ) : (
-                <div className="p-4 bg-slate-800/50 rounded-xl border border-dashed border-slate-700 text-center">
-                  <p className="text-xs font-bold text-slate-500 animate-pulse">방장의 시작을 기다리고 있습니다...</p>
-                </div>
-              )}
+            {/* 클릭 인디케이터 */}
+            <div className="absolute bottom-6 right-6 opacity-40 group-hover:opacity-100 transition-opacity">
+              <ChevronRight className="w-6 h-6 text-white animate-pulse" strokeWidth={2} />
             </div>
           </div>
-        )}
+        </div>
+      </div>
 
-        {/* 3. Game Play */}
-        {isJoined && roomData?.status === 'playing' && myData && (
-          <div className="space-y-6 pb-20 animate-in fade-in slide-in-from-bottom-8 duration-700">
+      {/* 선택지 - 미니멀 카드 */}
+      {choiceMode && currentLine.options && (
+        <div className="absolute inset-0 bg-black/90 backdrop-blur-xl z-40 flex items-center justify-center p-8">
+          <div className="max-w-2xl w-full space-y-6 animate-slide-up">
+            <h2 className="text-2xl font-semibold text-white text-center mb-8" style={{ fontFamily: 'Crimson Pro, serif' }}>
+              {currentLine.question}
+            </h2>
+            <div className="space-y-4">
+              {currentLine.options.map((opt, i) => (
+                <button 
+                  key={i}
+                  onClick={() => handleChoice(opt)}
+                  className="w-full p-6 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 rounded-xl text-left transition-all duration-300 hover:scale-[1.02] group"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 font-semibold group-hover:bg-blue-500/30 transition-colors">
+                      {i + 1}
+                    </div>
+                    <span className="text-lg font-medium text-white" style={{ fontFamily: 'Inter, sans-serif' }}>
+                      {opt.text}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 미니게임 - 현대적 그리드 */}
+      {miniGameMode && miniGameData && (
+        <div className="absolute inset-0 bg-black/90 backdrop-blur-xl z-40 flex items-center justify-center p-8">
+          <div className="max-w-4xl w-full animate-slide-up">
+            <h2 className="text-3xl font-semibold text-white text-center mb-12" style={{ fontFamily: 'Crimson Pro, serif' }}>
+              {miniGameData.instruction}
+            </h2>
             
-            {/* Score Track */}
-            <div className="bg-slate-900/50 border border-white/5 p-4 rounded-3xl backdrop-blur-md">
-              <div className="flex justify-between items-center relative">
-                <div className="absolute top-1/2 left-0 w-full h-0.5 bg-slate-800 -z-10"></div>
-                {roomData.questScores.map((s,i) => (
-                  <div key={i} className={`relative flex flex-col items-center gap-1 transition-all duration-500 ${i===roomData.currentQuestIndex ? 'scale-110' : 'opacity-70'}`}>
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black text-sm border-2 shadow-lg transition-all z-10
-                      ${s===true ? 'bg-blue-600 border-blue-400 text-white' : 
-                        s===false ? 'bg-rose-600 border-rose-400 text-white' : 
-                        i===roomData.currentQuestIndex ? 'bg-slate-900 border-amber-500 text-amber-500 ring-2 ring-amber-500/20' : 
-                        'bg-slate-900 border-slate-700 text-slate-600'}`}>
-                      {s===true ? <Shield size={16}/> : s===false ? <Sword size={16}/> : i+1}
+            {(miniGameData.game_type === 'observation' || miniGameData.game_type === 'search') && (
+              <div className="grid grid-cols-2 gap-6">
+                {miniGameData.items.map((item, i) => (
+                  <button
+                    key={i}
+                    onClick={() => handleMiniGameComplete(item.correct || true, item.result)}
+                    className="p-8 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-blue-400/50 rounded-2xl transition-all duration-300 hover:scale-105 group"
+                  >
+                    <div className="text-center">
+                      <div className="text-5xl mb-4 opacity-60 group-hover:opacity-100 transition-opacity">
+                        {item.id === 'mess' ? '🎨' : item.id === 'painting' ? '🖼️' : item.id === 'window' ? '🪟' : '📋'}
+                      </div>
+                      <h3 className="text-xl font-semibold text-white" style={{ fontFamily: 'Inter, sans-serif' }}>
+                        {item.name}
+                      </h3>
                     </div>
-                    <span className="text-[9px] font-bold text-slate-500 bg-slate-950 px-1.5 rounded">{roomData.questRules[i]}인</span>
-                  </div>
+                  </button>
                 ))}
               </div>
-            </div>
-
-            {/* Identity Card (Flip Effect) */}
-            <div className="perspective-1000 h-[200px] w-full cursor-pointer group" onClick={() => { vibrate(); setIsCardFlipped(!isCardFlipped); }}>
-              <div className={`relative w-full h-full duration-500 preserve-3d transition-transform ${isCardFlipped ? 'rotate-y-180' : ''}`} style={{ transformStyle: 'preserve-3d', transform: isCardFlipped ? 'rotateY(180deg)' : 'rotateY(0deg)' }}>
-                {/* Front */}
-                <div className="absolute w-full h-full backface-hidden bg-gradient-to-br from-slate-800 to-slate-900 rounded-[2rem] border border-slate-700 flex flex-col items-center justify-center shadow-2xl p-6 group-hover:border-slate-600 transition-colors">
-                  <div className="w-16 h-16 bg-slate-950 rounded-full flex items-center justify-center mb-4 border border-slate-800 shadow-inner">
-                    <Lock size={24} className="text-slate-500" />
-                  </div>
-                  <h3 className="text-xl font-bold text-slate-300">신분 확인</h3>
-                  <p className="text-xs text-slate-500 mt-2 uppercase tracking-widest font-bold">Tap to Reveal Identity</p>
-                </div>
-                {/* Back */}
-                <div className={`absolute w-full h-full backface-hidden bg-gradient-to-br rounded-[2rem] border flex flex-col items-center justify-center shadow-2xl p-6 text-center ${myData.isEvil ? 'from-rose-950 to-slate-950 border-rose-500/30' : 'from-blue-950 to-slate-950 border-blue-500/30'}`} style={{ transform: 'rotateY(180deg)' }}>
-                  <div className={`text-xs font-bold uppercase tracking-[0.3em] mb-2 ${myData.isEvil ? 'text-rose-500' : 'text-blue-500'}`}>Your Role</div>
-                  <h2 className={`text-4xl font-black mb-4 drop-shadow-lg ${myData.isEvil ? 'text-rose-500' : 'text-blue-400'}`}>{myData.role}</h2>
-                  <div className={`text-xs font-medium px-4 py-2 rounded-lg border bg-black/20 ${myData.isEvil ? 'text-rose-200 border-rose-500/20' : 'text-blue-200 border-blue-500/20'}`}>{myData.info}</div>
-                </div>
+            )}
+            
+            {miniGameData.game_type === 'timing' && (
+              <div className="flex justify-center">
+                <button
+                  onClick={() => handleMiniGameComplete(true, miniGameData.result)}
+                  className="px-16 py-12 bg-red-600/80 hover:bg-red-500 text-white text-2xl font-bold rounded-2xl transition-all duration-300 hover:scale-110 border-2 border-red-400/30 animate-pulse"
+                  style={{ fontFamily: 'Inter, sans-serif' }}
+                >
+                  빨리 클릭! ⏱️
+                </button>
               </div>
-            </div>
-
-            {/* Leader Badge */}
-            <div className="flex items-center justify-center gap-2">
-              <div className="bg-amber-500/10 border border-amber-500/20 px-4 py-1.5 rounded-full flex items-center gap-2">
-                <Crown size={14} className="text-amber-500" />
-                <span className="text-[10px] font-bold text-amber-500 uppercase tracking-wider">Leader</span>
-                <span className="text-sm font-bold text-white">{players[roomData.leaderIndex]?.name}</span>
-              </div>
-            </div>
-
-            {/* Game Phases */}
-            <div className="bg-slate-900/60 border border-white/5 p-1 rounded-[2.5rem] backdrop-blur-xl shadow-2xl">
-              <div className="bg-slate-950/80 rounded-[2.3rem] p-6 border border-white/5 min-h-[220px] flex flex-col justify-center">
-                {roomData.phase === 'team_building' && (
-                  <TeamBuilding roomCode={roomCode} players={players} roomData={roomData} user={user} isLeader={players[roomData.leaderIndex]?.id===user.uid} vibrate={vibrate} />
-                )}
-                {roomData.phase === 'voting' && (
-                  <Voting roomCode={roomCode} roomData={roomData} user={user} vibrate={vibrate} />
-                )}
-                {roomData.phase === 'quest' && (
-                  <Quest roomCode={roomCode} roomData={roomData} user={user} myRole={myData.role} vibrate={vibrate} />
-                )}
-                {roomData.phase === 'assassin' && (
-                   <div className="text-center space-y-4 animate-in zoom-in">
-                     <div className="inline-block p-4 bg-rose-500/10 rounded-full mb-2 border border-rose-500/30"><Skull size={40} className="text-rose-500"/></div>
-                     <h2 className="text-2xl font-black text-rose-500 uppercase">Assassin Phase</h2>
-                     <p className="text-sm text-slate-400">악의 세력은 멀린을 찾아 암살하세요.</p>
-                   </div>
-                )}
-                {roomData.status === 'evil_win' && (
-                  <div className="text-center animate-in bounce-in">
-                    <h2 className="text-4xl font-black text-rose-600 mb-2 drop-shadow-[0_0_10px_rgba(225,29,72,0.5)]">EVIL WINS</h2>
-                    <p className="text-xs text-slate-500 font-bold uppercase tracking-widest">The Kingdom has fallen</p>
-                  </div>
-                )}
-              </div>
-            </div>
-
+            )}
           </div>
-        )}
-      </div>
-    </div>
-  );
-}
+        </div>
+      )}
 
-// --- Sub Components ---
-
-function TeamBuilding({ roomCode, players, roomData, user, isLeader, vibrate }) {
-  const [selected, setSelected] = useState([]);
-  const need = roomData.questRules[roomData.currentQuestIndex];
-  
-  const toggle = (id) => {
-    if(!isLeader) return;
-    vibrate();
-    if(selected.includes(id)) setSelected(selected.filter(i=>i!==id));
-    else if(selected.length < need) setSelected([...selected, id]);
-  };
-  
-  const submit = async () => {
-    if(selected.length!==need) return;
-    vibrate();
-    await updateDoc(doc(db,'rooms',roomCode), { phase:'voting', currentTeam:selected, votes:{} });
-  };
-
-  return (
-    <div className="space-y-5 animate-in slide-in-from-right-8 duration-500">
-      <div className="text-center">
-        <h3 className="text-lg font-black text-white">원정대 선발</h3>
-        <p className="text-xs text-indigo-400 font-bold uppercase mt-1">Select {need} Knights</p>
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        {players.map(p => {
-          const isSel = selected.includes(p.id);
-          return (
-            <div key={p.id} onClick={()=>toggle(p.id)} className={`p-3 rounded-xl border flex items-center justify-between transition-all duration-200 ${isSel ? 'bg-indigo-600 border-indigo-400 text-white shadow-lg shadow-indigo-500/20 scale-[1.02]' : 'bg-slate-800 border-slate-700 text-slate-400'} ${isLeader?'cursor-pointer active:scale-95':'opacity-50'}`}>
-              <span className="text-sm font-bold">{p.name}</span>
-              {isSel && <CheckCircle2 size={16}/>}
+      {/* 증거창 - 갤러리 스타일 */}
+      {evidenceMode && (
+        <div className="absolute inset-0 bg-black/95 backdrop-blur-xl z-40 overflow-y-auto">
+          <div className="max-w-7xl mx-auto p-8">
+            <div className="flex items-center justify-between mb-12">
+              <div className="flex items-center gap-4">
+                <FileText className="w-8 h-8 text-amber-400" strokeWidth={2} />
+                <h2 className="text-3xl font-semibold text-white" style={{ fontFamily: 'Crimson Pro, serif' }}>
+                  증거 목록
+                </h2>
+              </div>
+              <button 
+                onClick={() => setEvidenceMode(false)}
+                className="px-6 py-3 bg-white/5 hover:bg-white/10 text-white font-semibold rounded-xl border border-white/10 transition-all"
+                style={{ fontFamily: 'Inter, sans-serif' }}
+              >
+                닫기
+              </button>
             </div>
-          )
-        })}
-      </div>
-      {isLeader ? (
-        <button onClick={submit} disabled={selected.length!==need} className="w-full bg-indigo-600 disabled:bg-slate-800 disabled:text-slate-600 text-white py-4 rounded-xl font-bold mt-2 shadow-lg transition-all active:scale-95">
-          원정대 제안 승인
-        </button>
-      ) : <p className="text-center text-xs text-slate-500 font-bold mt-4 animate-pulse">리더가 원정대를 선발 중입니다...</p>}
+            
+            {collectedEvidence.length === 0 ? (
+              <div className="text-center text-gray-400 py-32">
+                <FileText className="w-16 h-16 mx-auto mb-4 opacity-20" strokeWidth={1} />
+                <p className="text-xl" style={{ fontFamily: 'Inter, sans-serif' }}>수집한 증거가 없습니다</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {collectedEvidence.map(item => (
+                  <button
+                    key={item.id}
+                    onClick={() => presentEvidence(item.id)}
+                    className="p-6 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-amber-400/50 rounded-2xl transition-all duration-300 hover:scale-[1.02] text-left group"
+                  >
+                    <div className="flex items-start gap-6">
+                      <div className="text-5xl flex-shrink-0 opacity-80 group-hover:opacity-100 transition-opacity">
+                        {item.icon}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-xl font-semibold text-white mb-2" style={{ fontFamily: 'Inter, sans-serif' }}>
+                          {item.name}
+                        </h3>
+                        <p className="text-sm text-gray-400 leading-relaxed" style={{ fontFamily: 'Inter, sans-serif' }}>
+                          {item.desc}
+                        </p>
+                        <div className="mt-3 text-xs text-amber-400 font-semibold opacity-0 group-hover:opacity-100 transition-opacity">
+                          클릭하여 제시 →
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function Voting({ roomCode, roomData, user, vibrate }) {
-  const voted = roomData.votes?.[user.uid] !== undefined;
-  
-  const vote = async (appr) => {
-    vibrate();
-    const newVotes = { ...roomData.votes, [user.uid]: appr };
-    if(Object.keys(newVotes).length === roomData.playerCount) {
-      const y = Object.values(newVotes).filter(v=>v).length;
-      if(y > Object.values(newVotes).length/2) {
-        await updateDoc(doc(db,'rooms',roomCode), { votes:newVotes, phase:'quest', questVotes:{} });
-      } else {
-        await updateDoc(doc(db,'rooms',roomCode), { votes:newVotes, phase:'team_building', leaderIndex:(roomData.leaderIndex+1)%roomData.playerCount });
-      }
-    } else {
-      await updateDoc(doc(db,'rooms',roomCode), { [`votes.${user.uid}`]: appr });
-    }
-  };
-
-  if(voted) return (
-    <div className="text-center py-10 space-y-3">
-      <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center mx-auto animate-pulse"><Scroll className="text-slate-600"/></div>
-      <p className="text-sm text-slate-500 font-bold">다른 기사들의 투표를 기다리는 중...</p>
-    </div>
-  );
-
-  return (
-    <div className="space-y-6 animate-in zoom-in duration-300">
-      <div className="text-center">
-        <h3 className="text-lg font-black text-white">원정 승인 투표</h3>
-        <p className="text-xs text-slate-500 font-bold uppercase mt-1">Accept or Reject Proposal</p>
-      </div>
-      
-      <div className="flex justify-center gap-2 mb-4">
-        {roomData.currentTeam.map(uid => (
-             <div key={uid} className="w-8 h-8 rounded-full bg-slate-800 border border-slate-600 flex items-center justify-center text-xs text-white font-bold shadow-md"><Users size={12}/></div>
-        ))}
-      </div>
-
-      <div className="flex gap-3">
-        <button onClick={()=>vote(true)} className="flex-1 bg-slate-800 hover:bg-emerald-900/30 border border-slate-700 hover:border-emerald-500/50 p-5 rounded-2xl flex flex-col items-center gap-2 transition-all active:scale-95 group">
-          <ThumbsUp size={28} className="text-slate-500 group-hover:text-emerald-500 transition-colors"/>
-          <span className="text-sm font-bold text-slate-400 group-hover:text-emerald-400">승인</span>
-        </button>
-        <button onClick={()=>vote(false)} className="flex-1 bg-slate-800 hover:bg-rose-900/30 border border-slate-700 hover:border-rose-500/50 p-5 rounded-2xl flex flex-col items-center gap-2 transition-all active:scale-95 group">
-          <ThumbsDown size={28} className="text-slate-500 group-hover:text-rose-500 transition-colors"/>
-          <span className="text-sm font-bold text-slate-400 group-hover:text-rose-400">거부</span>
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function Quest({ roomCode, roomData, user, myRole, vibrate }) {
-  const isMember = roomData.currentTeam.includes(user.uid);
-  const acted = roomData.questVotes?.[user.uid] !== undefined;
-  
-  const action = async (success) => {
-    vibrate();
-    const newVotes = { ...roomData.questVotes, [user.uid]: success };
-    if(Object.keys(newVotes).length === roomData.currentTeam.length) {
-      const fails = Object.values(newVotes).filter(v=>!v).length;
-      const isFail = fails >= 1; 
-      const newScores = [...roomData.questScores];
-      newScores[roomData.currentQuestIndex] = !isFail;
-      const sTotal = newScores.filter(s=>s===true).length;
-      const fTotal = newScores.filter(s=>s===false).length;
-      let ph = 'team_building'; let st = 'playing';
-      if(sTotal>=3) { ph='assassin'; st='assassin_phase'; }
-      if(fTotal>=3) { ph='game_over'; st='evil_win'; }
-      await updateDoc(doc(db,'rooms',roomCode), {
-        questVotes: newVotes, questScores: newScores, currentQuestIndex: roomData.currentQuestIndex+1,
-        phase: ph, status: st, leaderIndex: (roomData.leaderIndex+1)%roomData.playerCount
-      });
-    } else {
-      await updateDoc(doc(db,'rooms',roomCode), { [`questVotes.${user.uid}`]: success });
-    }
-  };
-
-  if(!isMember) return <div className="text-center py-12 text-slate-500 font-bold text-sm opacity-60">⚔️ 원정대가 임무를 수행 중입니다...</div>;
-  if(acted) return <div className="text-center py-12 text-slate-500 font-bold text-sm">⏳ 결과를 기다리는 중...</div>;
-
-  const isEvil = ['암살자','모르가나','미니언','오베론','모드레드'].includes(myRole);
-  
-  return (
-    <div className="space-y-6 animate-in zoom-in duration-300">
-      <div className="text-center">
-        <h3 className="text-lg font-black text-white">임무 수행</h3>
-        <p className="text-xs text-slate-500 font-bold uppercase mt-1">Determine the Fate</p>
-      </div>
-      <div className="flex gap-4">
-        <button onClick={()=>action(true)} className="flex-1 bg-slate-800 hover:bg-blue-600 border border-slate-700 hover:border-blue-500 p-6 rounded-2xl flex flex-col items-center gap-3 transition-all active:scale-95 group">
-          <Shield size={32} className="text-blue-500 group-hover:text-white"/>
-          <span className="font-black text-blue-400 group-hover:text-white">성공</span>
-        </button>
-        {isEvil && (
-          <button onClick={()=>action(false)} className="flex-1 bg-slate-800 hover:bg-rose-600 border border-slate-700 hover:border-rose-500 p-6 rounded-2xl flex flex-col items-center gap-3 transition-all active:scale-95 group">
-            <Sword size={32} className="text-rose-500 group-hover:text-white"/>
-            <span className="font-black text-rose-400 group-hover:text-white">실패</span>
-          </button>
-        )}
-      </div>
-      {!isEvil && <p className="text-center text-[10px] text-slate-600 font-bold mt-2">* 선의 세력은 '성공'만 선택 가능합니다.</p>}
-    </div>
-  );
-                      }
+export default AceAttorneyGame;
