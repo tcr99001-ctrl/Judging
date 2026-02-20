@@ -27,6 +27,7 @@ import {
    - Evidence Combine (req 2개 → result)
    - Save/Load 3 slots (localStorage)
    - UI: safe-area, 가림/끊김 최소화
+   - Error Overlay: console 없이도 화면에서 런타임 오류 확인 가능
 ========================================================= */
 
 /* =========================
@@ -61,9 +62,6 @@ function ensureSentence(text) {
   const last = s[s.length - 1];
   const has = last === '.' || last === '!' || last === '?' || last === '…';
   return has ? s : s + '.';
-}
-function deepClone(obj) {
-  return JSON.parse(JSON.stringify(obj));
 }
 
 /* =========================
@@ -230,7 +228,21 @@ function useAudioBus() {
 }
 
 /* =========================
-   4) GAME_DB (Episode 1 + Trial 1 script)
+   4) Image preload (optional bg)
+========================= */
+function preloadImage(url) {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined') return resolve(false);
+    if (!url) return resolve(false);
+    const img = new Image();
+    img.onload = () => resolve(true);
+    img.onerror = () => resolve(false);
+    img.src = url;
+  });
+}
+
+/* =========================
+   5) GAME_DB (Episode 1 + Trial 1 script)
 ========================= */
 const GAME_DB = {
   meta: {
@@ -244,16 +256,12 @@ const GAME_DB = {
     server: 'bg-gradient-to-br from-slate-900 via-indigo-950 to-black',
     tense: 'bg-gradient-to-br from-red-950 to-slate-900',
     ending: 'bg-gradient-to-br from-slate-950 via-slate-900 to-black',
-  },
-  bgm: {
-    trial: { type: 'square', freq: 210, rate: 0.33, depth: 9, volume: 0.02 },
-    tense: { type: 'triangle', freq: 240, rate: 0.22, depth: 7, volume: 0.025 },
-    victory: { type: 'sine', freq: 420, rate: 0.11, depth: 3, volume: 0.025 },
+    gameover: 'bg-gradient-to-br from-black via-red-950 to-slate-950',
   },
   characters: {
-    judge: { name: '마판사', color: '#6B7280', desc: '절차주의. 말이 짧다. 말버릇: 핵심만.' },
-    player: { name: '진무연', color: '#2563EB', desc: '직관과 논리를 선으로 연결하는 변호사. 말버릇: 선이 연결됐어.' },
-    prosecutor: { name: '류시온', color: '#DC2626', desc: '데이터 맹신 검사. 말버릇: 오차율 0%입니다.' },
+    judge: { name: '마판사', color: '#6B7280' },
+    player: { name: '진무연', color: '#2563EB', desc: '말버릇: 선이 연결됐어.' },
+    prosecutor: { name: '류시온', color: '#DC2626', desc: '말버릇: 오차율 0%입니다.' },
     witness1: {
       name: '박경비',
       color: '#10B981',
@@ -265,7 +273,6 @@ const GAME_DB = {
         crazy:
           "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23991B1B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E🤯%3C/text%3E%3C/svg%3E",
       },
-      desc: '사람 좋은 척하지만 빚에 쪼들린 경비원. 몰리면 아니유가 튀어나온다.',
     },
     witness2: {
       name: '최실장',
@@ -278,7 +285,6 @@ const GAME_DB = {
         crazy:
           "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23991B1B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😈%3C/text%3E%3C/svg%3E",
       },
-      desc: 'IT 총괄. 말버릇: 로그가 말해요. 몰리면 웃음으로 넘기다 갑자기 차가워진다.',
     },
     witness3: {
       name: '윤기사',
@@ -291,24 +297,22 @@ const GAME_DB = {
         crazy:
           "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23991B1B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😡%3C/text%3E%3C/svg%3E",
       },
-      desc: '시설 관리 기사. 말버릇: 전기는 거짓말 안 해요. 몰리면 냉소가 튀어나온다.',
     },
   },
   evidence: {
-    autopsy: { name: '검시 소견서', icon: '🧾', desc: '피해자 윤비서의 사인은 둔기성 두부 손상. 사망 추정 시각 21:00.' },
-    smartwatch_data: { name: '피해자 스마트워치', icon: '⌚', desc: '심박이 20:45:12 급상승 후 20:45:19 급정지. 이후 움직임 없음.' },
-    server_log: { name: '서버실 도어락 로그', icon: '🚪', desc: "20:55~21:05 동안 '잠김 유지'. '열림' 이벤트 없음." },
-    hall_cctv: { name: '복도 CCTV 캡처', icon: '📹', desc: '21:00 전후 복도에 누군가 스쳐 지나가지만 프레임 드롭으로 얼굴이 깨진다.' },
-    power_spike: { name: '랙 전력 급등 기록', icon: '🔌', desc: '20:45:12 서버랙 전력 급등. 0.2초 과전류 보호가 작동했다.' },
-    voice_print: { name: '서버실 인터폰 음성 로그', icon: '🎙️', desc: "20:59 '문 열어' 음성. 발화자 분류가 윤비서로 찍혀 있다." },
+    autopsy: { name: '검시 소견서', icon: '🧾', desc: '사인은 둔기성 두부 손상. 사망 추정 21:00.' },
+    smartwatch_data: { name: '스마트워치', icon: '⌚', desc: '20:45:19 심정지 기록.' },
+    server_log: { name: '도어락 로그', icon: '🚪', desc: '20:55~21:05 잠김 유지. 열림 없음.' },
+    hall_cctv: { name: '복도 CCTV', icon: '📹', desc: '프레임 드롭. 얼굴 식별 불가.' },
+    power_spike: { name: '전력 급등', icon: '🔌', desc: '20:45:12 랙 전력 급등.' },
+    voice_print: { name: '인터폰 음성 로그', icon: '🎙️', desc: "20:59 '문 열어' 음성. 윤비서로 분류됨." },
     server_blade: {
-      name: '피 묻은 서버 블레이드',
+      name: '서버 블레이드',
       icon: '🔪',
-      desc: '현장에 떨어진 금속 부품. 손잡이에서 박경비 지문 검출.',
+      desc: '손잡이 지문(박경비). 끝부분 변색.',
       examine: {
         bg: 'bg-slate-800 text-gray-200',
-        content:
-          "[압수품: 서버 블레이드 제1호]\n무게 3.5kg 금속 부품.\n손잡이 혈흔 다량.\n끝부분 변색이 이상하다.",
+        content: '[압수품]\n금속 부품.\n끝부분 변색이 이상하다.',
         hotspots: [
           {
             id: 'burn_mark',
@@ -317,45 +321,25 @@ const GAME_DB = {
             width: 16,
             height: 22,
             resultEvidenceKey: 'electric_burn',
-            successMsg: '끝부분이 국부 용융됐다. 혈흔이 아니라 고전압 스파크 흔적이다.',
+            successMsg: '탄 자국이다. 스파크 흔적.',
           },
         ],
       },
     },
-    electric_burn: { name: '블레이드의 탄 자국', icon: '⚡', desc: '고전압 스파크에 의한 용융 자국. 금속 표면이 녹아내렸다.' },
-    real_time_of_death: {
-      name: '진짜 사망 시각 (20:45)',
-      icon: '⏱️',
-      desc: '스마트워치 심정지와 전력 급등이 20:45에 일치한다. 21:00 타격은 사후일 가능성이 크다.',
-    },
-    staged_accident: {
-      name: '감전사 위장 정황',
-      icon: '💀',
-      desc: '피해자는 20:45 감전으로 즉사했고, 누군가 21:00 전후 두부 손상을 추가해 살인으로 위장했다.',
-    },
-    evolved_voice_log: { name: '조작된 분류 정황', icon: '🧩', desc: "프레임 드롭과 분류 모델 편향으로 '윤비서 음성' 태깅이 틀릴 수 있다." },
+    electric_burn: { name: '탄 자국', icon: '⚡', desc: '고전압 스파크 흔적.' },
+    real_time_of_death: { name: '진짜 사망 시각', icon: '⏱️', desc: '20:45 심정지.' },
+    staged_accident: { name: '감전사 위장', icon: '💀', desc: '감전사 후 사후 타격 위장.' },
+    evolved_voice_log: { name: '분류 조작 정황', icon: '🧩', desc: '프레임 드롭+분류 편향으로 태깅 오류 가능.' },
   },
   combinations: [
-    {
-      req: ['autopsy', 'smartwatch_data'],
-      result: 'real_time_of_death',
-      successMsg: '심정지(20:45)가 진짜 사망 시각이다. 21:00의 타격은 사후일 가능성이 생겼다.',
-    },
-    {
-      req: ['real_time_of_death', 'electric_burn'],
-      result: 'staged_accident',
-      successMsg: '탄 자국과 20:45 심정지. 선이 연결됐다. 사인은 타살이 아니라 감전사다.',
-    },
-    {
-      req: ['voice_print', 'hall_cctv'],
-      result: 'evolved_voice_log',
-      successMsg: '프레임 드롭과 음성 분류. 보이는 것과 태깅된 것은 다를 수 있다.',
-    },
+    { req: ['autopsy', 'smartwatch_data'], result: 'real_time_of_death', successMsg: '진짜 사망 시각은 20:45.' },
+    { req: ['real_time_of_death', 'electric_burn'], result: 'staged_accident', successMsg: '감전사 위장 정황이 완성됐다.' },
+    { req: ['voice_print', 'hall_cctv'], result: 'evolved_voice_log', successMsg: '음성 태깅은 조작 가능성이 있다.' },
   ],
   cases: [
     {
       title: '제1화: 단선된 진실',
-      apMax: 5,
+      apMax: 7,
       initialEvidence: ['autopsy', 'smartwatch_data', 'server_log', 'server_blade', 'voice_print', 'power_spike', 'hall_cctv'],
       script: [
         { type: 'scene', bgKey: 'court', bgmKey: 'trial' },
@@ -372,15 +356,6 @@ const GAME_DB = {
             { id: 'w1_01', text: '21:00 정각, 누가 서버실 쪽에서 튀어나왔슈.' },
             {
               id: 'w1_02',
-              text: '손에 피 묻은 블레이드를 들고 있었구먼.',
-              pressQ: '피를 봤다?',
-              press: [
-                { charKey: 'player', text: '거리랑 조명. 정확히.' },
-                { charKey: 'witness1', face: 'sweat', text: '복도등이 깜빡였슈. 그래도 빨갛게… 보였슈.' },
-              ],
-            },
-            {
-              id: 'w1_03',
               text: '문이 열려 있었슈. 그래서 나왔다고 확신했슈.',
               pressQ: '문이 열렸다고요?',
               press: [
@@ -391,25 +366,15 @@ const GAME_DB = {
                 newText: '문이 열렸다고 생각했슈. 나중에 로그가 잠겼다고 해서… 헷갈렸슈.',
                 weakness: true,
                 contradictionEvidenceKey: 'server_log',
-                failMsg: '도어락 로그에 열림 이벤트가 있나?',
+                failMsg: '도어락 로그를 봐라.',
               },
-            },
-            {
-              id: 'w1_04',
-              text: '얼굴은 못 봤지만, 빨간 랜야드가 흔들렸슈.',
-              pressQ: '얼굴도 못 봤는데 확정?',
-              press: [
-                { charKey: 'player', text: '확정은 금지죠.' },
-                { charKey: 'witness1', face: 'sweat', text: "아니유. 그래서… '그럴 것 같다'였슈." },
-              ],
             },
           ],
         },
 
         { type: 'anim', name: 'objection' },
         { type: 'talk', charKey: 'player', text: '이의 있습니다. 20:55부터 21:05까지 문은 열린 적이 없습니다.' },
-        { type: 'talk', charKey: 'prosecutor', text: '시간 착각이죠. 20:55 이전에 들어가 잠복.' },
-        { type: 'talk', charKey: 'player', text: '그럼 사망 시각부터 바꿔야겠네요.' },
+        { type: 'talk', charKey: 'prosecutor', text: '시간 착각이죠. 잠복하면 됩니다.' },
 
         {
           type: 'trial',
@@ -419,10 +384,10 @@ const GAME_DB = {
           statements: [
             {
               id: 'p_01',
-              text: '사망 추정 시각은 21:00입니다. 흔들리지 않습니다.',
+              text: '사망 추정 시각은 21:00입니다.',
               weakness: true,
               contradictionEvidenceKey: 'real_time_of_death',
-              failMsg: '두 단서를 조합해 진짜 사망 시각을 만들어야 한다.',
+              failMsg: '부검+워치를 조합해라.',
             },
           ],
         },
@@ -430,13 +395,6 @@ const GAME_DB = {
         { type: 'anim', name: 'objection' },
         { type: 'talk', charKey: 'player', text: '선이 연결됐어. 심정지는 20:45입니다.' },
         { type: 'talk', charKey: 'prosecutor', text: '…뭐죠, 그건.' },
-        { type: 'talk', charKey: 'player', text: '21:00의 타격은 사후입니다.' },
-
-        { type: 'talk', charKey: 'prosecutor', text: '좋아. 그럼 20:45의 사람.' },
-        { type: 'talk', charKey: 'prosecutor', text: '박경비. 흉기 지문. 끝.' },
-
-        { type: 'talk', charKey: 'witness1', face: 'crazy', text: '아니유! 난 만졌을 뿐이유! 겁나서…!' },
-        { type: 'talk', charKey: 'judge', text: '다음 증인.' },
 
         {
           type: 'trial',
@@ -444,35 +402,25 @@ const GAME_DB = {
           witnessCharKey: 'witness2',
           bgKey: 'tense',
           statements: [
-            { id: 'w2_01', text: '로그가 말해요. 20:45. 박경비 동선. 끝.' },
             {
-              id: 'w2_02',
+              id: 'w2_01',
               text: '블레이드가 흉기입니다. 피가 증거예요.',
               pressQ: '피가 곧 살인?',
               press: [
                 { charKey: 'player', text: '끝부분 변색은 봤나요?' },
-                { charKey: 'witness2', face: 'sweat', text: '그건… 중요하지 않죠. 피가 더 중요하니까.' },
+                { charKey: 'witness2', face: 'sweat', text: '그건… 중요하지 않죠.' },
               ],
               evolveOnPress: {
-                newText: '피가 묻은 흉기면 끝이에요. 다른 해석은 변명입니다.',
+                newText: '피가 묻은 흉기면 끝이에요.',
                 weakness: true,
                 contradictionEvidenceKey: 'staged_accident',
-                failMsg: '탄 자국 + 진짜 사망 시각을 조합해 위장을 만들라.',
+                failMsg: '탄 자국+진짜 사망 시각을 조합해라.',
               },
             },
           ],
         },
 
-        { type: 'anim', name: 'objection' },
         { type: 'talk', charKey: 'player', text: '이 사건의 본질은 살인이 아닙니다. 감전사입니다.' },
-        { type: 'talk', charKey: 'prosecutor', text: '감전…?' },
-        { type: 'talk', charKey: 'player', text: '20:45 전력 급등. 탄 자국. 심정지. 선이 맞아요.' },
-        { type: 'talk', charKey: 'judge', text: '21:00의 타격은?' },
-        { type: 'talk', charKey: 'player', text: '사후 위장입니다.' },
-
-        { type: 'talk', charKey: 'witness2', face: 'crazy', text: '…재밌네요.' },
-        { type: 'talk', charKey: 'player', text: '뭐가요.' },
-        { type: 'talk', charKey: 'witness2', text: '알면… 불편해져요.' },
 
         {
           type: 'trial',
@@ -480,38 +428,27 @@ const GAME_DB = {
           witnessCharKey: 'witness3',
           bgKey: 'server',
           statements: [
-            { id: 'w3_01', text: '전기는 거짓말 안 해요. 사람은 해요.' },
             {
-              id: 'w3_02',
-              text: '20:59 인터폰. 윤비서 음성으로 분류됐죠.',
+              id: 'w3_01',
+              text: "20:59 인터폰. 윤비서 음성으로 분류됐죠.",
               pressQ: '윤비서는 20:45에 죽었다.',
               press: [
                 { charKey: 'player', text: '그럼 태깅이 틀렸을 수도.' },
-                { charKey: 'witness3', face: 'sweat', text: '분류는… 틀릴 수도 있어요. 프레임이 깨지면.' },
+                { charKey: 'witness3', face: 'sweat', text: '프레임이 깨지면요.' },
               ],
               evolveOnPress: {
-                newText: '프레임 드롭이면 태깅이 틀릴 수 있어요. 목소리도 과거 샘플에 끌려가요.',
+                newText: '프레임 드롭이면 태깅이 틀릴 수 있어요.',
                 weakness: true,
                 contradictionEvidenceKey: 'evolved_voice_log',
-                failMsg: 'CCTV 프레임 드롭과 음성 분류를 엮어 조작 가능성을 만들라.',
+                failMsg: '음성+CCTV를 조합해라.',
               },
             },
           ],
         },
 
-        { type: 'talk', charKey: 'player', text: '즉, 윤비서 음성은 확정 증거가 아닙니다.' },
-        { type: 'talk', charKey: 'prosecutor', text: '오차율 0%…라고 했던 내가, 틀릴 수도 있나.' },
-
-        { type: 'talk', charKey: 'judge', text: '결론.' },
-        { type: 'talk', charKey: 'player', text: '20:45 감전사. 21:00 위장. 로그는 조작 가능. 유죄는 못 갑니다.' },
         { type: 'talk', charKey: 'judge', text: '무죄.' },
-
-        { type: 'talk', charKey: 'witness2', face: 'sweat', text: '…증언, 취소합니다.' },
-        { type: 'talk', charKey: 'judge', text: '정숙!' },
-
         { type: 'scene', bgKey: 'ending', bgmKey: 'victory' },
-        { type: 'talk', charKey: 'narrator', text: '법정 밖, 최실장은 발신자 없는 무음 전화를 받았다.' },
-        { type: 'talk', charKey: 'narrator', text: '그는 통화를 하지 않았다. 고개만 끄덕였다.' },
+        { type: 'talk', charKey: 'narrator', text: '최실장은 발신자 없는 무음 전화를 받았다.' },
         { type: 'talk', charKey: 'player', text: '선이… 끊겼어.' },
         { type: 'end', text: 'THE END' },
       ],
@@ -520,7 +457,7 @@ const GAME_DB = {
 };
 
 /* =========================
-   5) Compile DSL → runtime
+   6) Compile DSL → runtime
 ========================= */
 function compileGame(db) {
   const baseCase = db.cases?.[0];
@@ -591,12 +528,8 @@ function compileGame(db) {
       continue;
     }
 
-    // fallback
     lines.push(raw);
   }
-
-  const initialEvidence = baseCase?.initialEvidence || [];
-  const apMax = baseCase?.apMax ?? 5;
 
   return {
     meta: db.meta,
@@ -605,14 +538,13 @@ function compileGame(db) {
     evidence: db.evidence,
     combinations: db.combinations || [],
     lines,
-    initialEvidence,
-    apMax,
-    bgm: db.bgm,
+    initialEvidence: baseCase?.initialEvidence || [],
+    apMax: baseCase?.apMax ?? 5,
   };
 }
 
 /* =========================
-   6) State + Reducer
+   7) State + Reducer
 ========================= */
 const AT = {
   RESET: 'RESET',
@@ -638,22 +570,17 @@ function initialState(game) {
     bgKey: game.lines?.[0]?.bgKey || 'court',
     hpMax: game.apMax,
     hp: game.apMax,
-    // inventory
     inv: Array.from(new Set(game.initialEvidence || [])),
-    // trial
     ceIndex: 0,
     pressMode: false,
     pressIndex: 0,
-    // ui
     evidenceOpen: false,
     combineOpen: false,
     examineOpen: false,
     examineKey: null,
     combineA: null,
     combineB: null,
-    // evolve memory: stmtId -> evolved {text, weakness,...}
     evolved: {},
-    // end flags
     ending: false,
     gameOver: false,
   };
@@ -667,12 +594,8 @@ function reducer(game, state, action) {
     if (!line || line.type !== 'cross_exam') return null;
     const s = line.statements?.[state.ceIndex] || null;
     if (!s) return null;
-    // if evolved exists, merge
     const ev = state.evolved?.[s.id];
-    if (ev) {
-      return { ...s, ...ev, isEvolved: true };
-    }
-    return s;
+    return ev ? { ...s, ...ev } : s;
   };
 
   switch (action.type) {
@@ -705,7 +628,7 @@ function reducer(game, state, action) {
     case AT.APPLY_COMBINE: {
       const a = state.combineA;
       const b = state.combineB;
-      if (!a || !b) return state;
+      if (!a || !b) return { ...state, combineOpen: false, combineA: null, combineB: null };
       const req = [a, b].sort().join('::');
 
       const hit = (game.combinations || []).find((c) => {
@@ -715,25 +638,16 @@ function reducer(game, state, action) {
 
       if (!hit) return { ...state, combineOpen: false, combineA: null, combineB: null };
 
-      const resultKey = hit.result;
       const inv = new Set(state.inv);
-      inv.add(resultKey);
+      inv.add(hit.result);
 
-      return {
-        ...state,
-        inv: Array.from(inv),
-        combineOpen: false,
-        combineA: null,
-        combineB: null,
-        // show overlay via ui event outside reducer
-      };
+      return { ...state, inv: Array.from(inv), combineOpen: false, combineA: null, combineB: null };
     }
 
     case AT.PRESS: {
       if (!line || line.type !== 'cross_exam') return state;
       const s = getStatement();
-      if (!s) return state;
-      if (!s.press || !s.press.length) return state;
+      if (!s?.press?.length) return state;
       return { ...state, pressMode: true, pressIndex: 0 };
     }
 
@@ -743,11 +657,9 @@ function reducer(game, state, action) {
       const n = s?.press?.length || 0;
       if (n <= 0) return { ...state, pressMode: false, pressIndex: 0 };
 
-      // if there is evolveOnPress and press is fully consumed, evolve then exit press
       const last = state.pressIndex >= n - 1;
       if (!last) return { ...state, pressIndex: state.pressIndex + 1 };
 
-      // consume last press then evolve (if any)
       const evo = s?.evolveOnPress;
       if (evo) {
         const nextEvolved = { ...(state.evolved || {}) };
@@ -768,55 +680,33 @@ function reducer(game, state, action) {
       const s = getStatement();
       if (!s) return state;
 
-      // require weakness to be true to allow solve
       const isWeak = !!s.weakness;
       const correctKey = s.contradictionEvidenceKey;
       const presented = action.key;
 
       if (isWeak && correctKey && presented === correctKey) {
-        // solved this trial segment: advance to next line
         const nextIdx = clamp(state.idx + 1, 0, lines.length - 1);
         const nextLine = lines[nextIdx];
-        return {
-          ...state,
-          idx: nextIdx,
-          bgKey: nextLine?.bgKey || state.bgKey,
-          ceIndex: 0,
-          pressMode: false,
-          pressIndex: 0,
-          evidenceOpen: false,
-        };
+        return { ...state, idx: nextIdx, bgKey: nextLine?.bgKey || state.bgKey, ceIndex: 0, pressMode: false, pressIndex: 0, evidenceOpen: false };
       }
 
-      // wrong: hp down
       const hp = Math.max(0, state.hp - 1);
       return { ...state, hp, gameOver: hp <= 0 };
     }
 
     case AT.NEXT: {
       if (state.ending || state.gameOver) return state;
-
-      // if press mode, next means press-next
       if (state.pressMode) return reducer(game, state, { type: AT.PRESS_NEXT });
 
       if (!line) return state;
 
-      if (line.type === 'scene') {
-        // auto-advance to next line; bgKey already set by scene
-        const nextIdx = clamp(state.idx + 1, 0, lines.length - 1);
-        const nextLine = lines[nextIdx];
-        return { ...state, idx: nextIdx, bgKey: nextLine?.bgKey || line.bgKey || state.bgKey };
-      }
-
-      if (line.type === 'anim') {
+      if (line.type === 'scene' || line.type === 'anim') {
         const nextIdx = clamp(state.idx + 1, 0, lines.length - 1);
         const nextLine = lines[nextIdx];
         return { ...state, idx: nextIdx, bgKey: nextLine?.bgKey || state.bgKey };
       }
 
-      if (line.type === 'end') {
-        return { ...state, ending: true };
-      }
+      if (line.type === 'end') return { ...state, ending: true };
 
       if (line.type === 'cross_exam') {
         const total = line.statements?.length || 0;
@@ -827,17 +717,14 @@ function reducer(game, state, action) {
         }
         const last = state.ceIndex >= total - 1;
         if (last) {
-          // block if unresolved weaknesses exist
-          const weakIdx = (line.statements || []).map((st, i) => ({ st, i })).filter(({ st }) => {
-            const ev = state.evolved?.[st.id];
-            const merged = ev ? { ...st, ...ev } : st;
-            return !!merged.weakness;
-          });
-          if (weakIdx.length > 0) {
-            // keep at first weak
-            return { ...state, ceIndex: weakIdx[0].i };
-          }
-          // no weak: advance
+          const weakIdx = (line.statements || [])
+            .map((st, i) => {
+              const ev = state.evolved?.[st.id];
+              const merged = ev ? { ...st, ...ev } : st;
+              return { st: merged, i };
+            })
+            .filter(({ st }) => !!st.weakness);
+          if (weakIdx.length > 0) return { ...state, ceIndex: weakIdx[0].i };
           const nextIdx = clamp(state.idx + 1, 0, lines.length - 1);
           const nextLine = lines[nextIdx];
           return { ...state, idx: nextIdx, bgKey: nextLine?.bgKey || state.bgKey, ceIndex: 0 };
@@ -857,7 +744,7 @@ function reducer(game, state, action) {
 }
 
 /* =========================
-   7) Runtime selectors
+   8) Runtime selectors
 ========================= */
 function pickAvatar(char, face) {
   const a = char?.avatars || {};
@@ -910,7 +797,6 @@ function deriveView(game, state) {
     ceTitle: isCE ? line.title : '',
     ceIndex: isCE ? state.ceIndex : 0,
     ceTotal: isCE ? (line.statements?.length || 0) : 0,
-    witnessKey: isCE ? line.witnessCharKey : null,
     stmt,
     speakerKey,
     speaker,
@@ -922,7 +808,7 @@ function deriveView(game, state) {
 }
 
 /* =========================
-   8) UI Components
+   9) UI Components
 ========================= */
 function Pill({ children }) {
   return <div className="px-4 py-2 rounded-full border border-white/10 bg-black/45 backdrop-blur-md">{children}</div>;
@@ -1076,19 +962,16 @@ function CombineModal({ open, onClose, inventory, evidenceMap, a, b, onPickA, on
         {inventory.map((key) => {
           const ev = evidenceMap[key];
           if (!ev) return null;
-          const selectedA = a === key;
-          const selectedB = b === key;
+          const selected = a === key || b === key;
           return (
             <button
               key={key}
               onClick={() => {
-                if (!a || selectedA) onPickA(key);
-                else if (!b || selectedB) onPickB(key);
+                if (!a || a === key) onPickA(key);
+                else if (!b || b === key) onPickB(key);
                 else onPickB(key);
               }}
-              className={`p-4 rounded-2xl border text-left transition ${
-                selectedA || selectedB ? 'bg-amber-500/10 border-amber-400/30' : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
-              }`}
+              className={`p-4 rounded-2xl border text-left transition ${selected ? 'bg-amber-500/10 border-amber-400/30' : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'}`}
             >
               <div className="flex items-start gap-3">
                 <div className="text-3xl">{ev.icon || '🗂️'}</div>
@@ -1133,7 +1016,6 @@ function ExamineModal({ open, onClose, evidenceKey, evidence, onFound }) {
         </pre>
 
         <div className="relative mt-4 w-full aspect-[16/9] rounded-2xl border border-white/10 bg-black/30 overflow-hidden">
-          {/* hotspots use percentage-like coordinates but are given as 0..100-ish */}
           {hotspots.map((h) => (
             <button
               key={h.id}
@@ -1190,7 +1072,7 @@ function AdmissionModal({ open, onClose, evidenceKey, evidence, admission, onOff
               {evidence?.desc || ''}
             </div>
             <div className="mt-3 flex flex-wrap gap-2 text-xs" style={{ fontFamily: 'Inter, sans-serif' }}>
-              <span className={`px-2 py-1 rounded-full border ${admitted ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200' : denied ? 'border-rose-400/30 bg-rose-500/10 text-rose-200' : 'border-white/10 bg-black/20 text-gray-200'}`}>
+              <span className={`px-2 py-1 rounded-full border ${admitted ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200' : denied ? 'border-rose-400/30 bg-rose-500/10 text-rose-200' : pending ? 'border-amber-400/30 bg-amber-500/10 text-amber-200' : 'border-white/10 bg-black/20 text-gray-200'}`}>
                 {admitted ? '채택됨' : denied ? '기각됨' : pending ? '심리중' : '미신청'}
               </span>
             </div>
@@ -1284,16 +1166,37 @@ function SaveLoadModal({ open, onClose, onSave, onLoad, onDelete }) {
 }
 
 /* =========================
-   9) Page
+   10) Page
 ========================= */
 export default function Page() {
   const audio = useAudioBus();
+
+  // ✅ runtime error overlay (console 없이 확인)
+  const [runtimeErr, setRuntimeErr] = useState(null);
+  useEffect(() => {
+    const onError = (event) => {
+      const msg = event?.error?.message || event?.message || 'Unknown error';
+      const stack = event?.error?.stack || '';
+      setRuntimeErr({ type: 'error', msg, stack });
+    };
+    const onRej = (event) => {
+      const reason = event?.reason;
+      const msg = reason?.message || String(reason || 'Unhandled rejection');
+      const stack = reason?.stack || '';
+      setRuntimeErr({ type: 'rejection', msg, stack });
+    };
+    window.addEventListener('error', onError);
+    window.addEventListener('unhandledrejection', onRej);
+    return () => {
+      window.removeEventListener('error', onError);
+      window.removeEventListener('unhandledrejection', onRej);
+    };
+  }, []);
 
   const game = useMemo(() => compileGame(GAME_DB), []);
   const [state, dispatch] = useReducer((s, a) => reducer(game, s, a), undefined, () => initialState(game));
   const view = useMemo(() => deriveView(game, state), [game, state]);
 
-  // ui overlay
   const [muted, setMuted] = useState(false);
   const [bgUrl, setBgUrl] = useState(null);
   const [shake, setShake] = useState(false);
@@ -1310,10 +1213,8 @@ export default function Page() {
   const [examineKey, setExamineKey] = useState(null);
   const [admissionKey, setAdmissionKey] = useState(null);
 
-  // admission state: basic (manual)
   const [admission, setAdmission] = useState(() => {
     const a = { admitted: new Set(), denied: new Map(), pending: new Map() };
-    // 기본은 “초기 증거”는 채택되어 있다고 가정(플레이 막힘 방지)
     for (const k of game.initialEvidence || []) a.admitted.add(k);
     return a;
   });
@@ -1326,15 +1227,13 @@ export default function Page() {
   const doOverlay = (t, ms = 1000) => (setOverlayMsg(t), setTimeout(() => setOverlayMsg(null), ms));
   const doEffect = (t, ms = 850) => (setEffectText(t), setTimeout(() => setEffectText(null), ms));
 
-  // bg update (image optional)
+  // optional bg image
   useEffect(() => {
-    // optional: you can map bgKey to image if you place files
-    // example mapping: /assets/bg/<bgKey>.webp
     const candidate = `/assets/bg/${view.bgKey}.webp`;
     preloadImage(candidate).then((ok) => setBgUrl(ok ? candidate : null));
   }, [view.bgKey]);
 
-  // bgm update (optional if you place files: /assets/bgm/<key>.ogg)
+  // optional bgm
   useEffect(() => {
     const line = view.line;
     if (!line || line.type !== 'scene') return;
@@ -1351,36 +1250,31 @@ export default function Page() {
     await audio.unlock();
   };
   const sfx = async (k) => {
-    // optional sfx file
     const url = `/assets/sfx/${k}.ogg`;
     await audio.playSfx(k, url).catch(() => {});
   };
 
-  // scene auto-advance
+  // auto-advance scenes
   useEffect(() => {
-    if (view.line?.type === 'scene') {
-      dispatch({ type: AT.NEXT });
-    }
+    if (view.line?.type === 'scene') dispatch({ type: AT.NEXT });
   }, [view.line?.type]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // anim auto effect
+  // anim effect + auto-advance
   useEffect(() => {
-    if (view.line?.type === 'anim') {
-      if (view.line.name === 'objection') {
-        doEffect('OBJECTION!');
-        doFlash();
-        sfx('objection');
-      } else if (view.line.name === 'flash') {
-        doFlash();
-        sfx('flash');
-      } else {
-        doFlash();
-      }
-      dispatch({ type: AT.NEXT });
+    if (view.line?.type !== 'anim') return;
+    if (view.line.name === 'objection') {
+      doEffect('OBJECTION!');
+      doFlash();
+      sfx('objection');
+    } else {
+      doFlash();
+      sfx('flash');
     }
+    dispatch({ type: AT.NEXT });
   }, [view.line?.type]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // helpers for present
+  const admittedSet = admission.admitted instanceof Set ? admission.admitted : new Set();
+
   const doPresent = async (key) => {
     await unlock();
     await sfx('flash');
@@ -1402,7 +1296,6 @@ export default function Page() {
     }, 80);
   };
 
-  // combine apply
   const applyCombine = async () => {
     const a = combineA;
     const b = combineB;
@@ -1410,29 +1303,14 @@ export default function Page() {
       doOverlay('두 개를 골라라.');
       return;
     }
-    const req = [a, b].sort().join('::');
-    const hit = (game.combinations || []).find((c) => (c.req || []).slice().sort().join('::') === req);
-
+    dispatch({ type: AT.APPLY_COMBINE });
     setCombineOpen(false);
     setCombineA(null);
     setCombineB(null);
-
-    if (!hit) {
-      doOverlay('아무 일도 없다.');
-      return;
-    }
-
-    const resultKey = hit.result;
-    if (!state.inv.includes(resultKey)) {
-      const inv = Array.from(new Set([...state.inv, resultKey]));
-      const nextState = { ...state, inv };
-      dispatch({ type: AT.HYDRATE, state: nextState });
-    }
-    doOverlay(hit.successMsg || '새로운 단서가 생겼다.');
+    doOverlay('조합 결과를 확인하라.');
     await sfx('admit');
   };
 
-  // examine found
   const onHotspotFound = async (h) => {
     if (!h?.resultEvidenceKey) return;
     const key = h.resultEvidenceKey;
@@ -1444,35 +1322,34 @@ export default function Page() {
     await sfx('admit');
   };
 
-  // admission ops
   const openAdmission = (key) => {
     setAdmissionKey(key);
     setAdmissionOpen(true);
   };
+
   const offerAdmission = () => {
     if (!admissionKey) return;
     const res = requestAdmission(admission, admissionKey);
     setAdmission(res.state);
     doOverlay('신청했다.');
   };
+
   const admitEvidence = () => {
     if (!admissionKey) return;
     const req = Array.from(admission.pending.values()).find((r) => r.evidenceKey === admissionKey);
     if (!req) return;
-    const next = ruleAdmission(admission, req.requestId, 'ADMIT');
-    setAdmission(next);
+    setAdmission((a) => ruleAdmission(a, req.requestId, 'ADMIT'));
     doOverlay('채택됐다.');
   };
+
   const denyEvidence = () => {
     if (!admissionKey) return;
     const req = Array.from(admission.pending.values()).find((r) => r.evidenceKey === admissionKey);
     if (!req) return;
-    const next = ruleAdmission(admission, req.requestId, 'DENY');
-    setAdmission(next);
+    setAdmission((a) => ruleAdmission(a, req.requestId, 'DENY'));
     doOverlay('기각됐다.');
   };
 
-  // save/load
   const onSave = async (slot) => {
     const blob = {
       schema: 1,
@@ -1488,6 +1365,7 @@ export default function Page() {
     const res = lsSave(slot, blob);
     return { ok: res.ok, msg: res.ok ? `슬롯 ${slot} 저장 완료` : `저장 실패: ${res.reason}` };
   };
+
   const onLoad = async (slot) => {
     const res = lsLoad(slot);
     if (!res.ok) return { ok: false, msg: `로드 실패: ${res.reason}` };
@@ -1504,15 +1382,18 @@ export default function Page() {
     setCombineB(data?.combine?.b || null);
     return { ok: true, msg: `슬롯 ${slot} 로드 완료` };
   };
+
   const onDelete = async (slot) => {
     const res = lsDelete(slot);
     return { ok: res.ok, msg: res.ok ? `슬롯 ${slot} 삭제 완료` : `삭제 실패: ${res.reason}` };
   };
 
-  // end screens
+  const bgStyle = bgUrl ? { backgroundImage: `url(${bgUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined;
+
+  // GAME OVER
   if (state.gameOver) {
     return (
-      <div className={`min-h-screen ${GAME_DB.backgrounds.gameover || 'bg-gradient-to-br from-black via-red-950 to-slate-950'} text-white flex items-center justify-center p-6`}>
+      <div className={`min-h-screen ${GAME_DB.backgrounds.gameover} text-white flex items-center justify-center p-6`} style={bgStyle}>
         <style jsx global>{GLOBAL_CSS}</style>
         <div className="w-full max-w-lg rounded-3xl bg-black/60 border border-white/10 backdrop-blur-xl p-8 text-center">
           <div className="text-6xl mb-4">💥</div>
@@ -1540,13 +1421,14 @@ export default function Page() {
     );
   }
 
+  // ENDING
   if (state.ending) {
     return (
-      <div className={`min-h-screen ${GAME_DB.backgrounds.ending} text-white flex items-center justify-center p-6`}>
+      <div className={`min-h-screen ${GAME_DB.backgrounds.ending} text-white flex items-center justify-center p-6`} style={bgStyle}>
         <style jsx global>{GLOBAL_CSS}</style>
         <div className="w-full max-w-2xl rounded-3xl bg-black/60 border border-white/10 backdrop-blur-xl p-8 text-center">
           <Scale className="w-20 h-20 mx-auto mb-5 text-blue-400" />
-          <div className="text-6xl font-bold mb-3" style={{ fontFamily: 'Crimson Pro, serif' }}>
+          <div className="text-5xl font-bold mb-3" style={{ fontFamily: 'Crimson Pro, serif' }}>
             {GAME_DB.meta.title}
           </div>
           <div className="text-gray-300 mb-8" style={{ fontFamily: 'Inter, sans-serif' }}>
@@ -1560,22 +1442,43 @@ export default function Page() {
     );
   }
 
-  // top background
-  const bgStyle = bgUrl
-    ? { backgroundImage: `url(${bgUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }
-    : undefined;
-
-  const admittedSet = admission.admitted instanceof Set ? admission.admitted : new Set();
-
   const speaker = view.speaker;
   const avatar = view.avatar;
-
   const pressable = view.isCE && !!view.stmt?.pressQ && (view.stmt?.press?.length || 0) > 0;
   const weakNow = !!view.stmt?.weakness;
 
   return (
     <div className={`h-screen w-full relative overflow-hidden ${view.bgClass} ${shake ? 'animate-shake' : ''}`} style={bgStyle}>
       <style jsx global>{GLOBAL_CSS}</style>
+
+      {/* runtime error overlay */}
+      {runtimeErr ? (
+        <div className="fixed inset-0 z-[9999] bg-black/90 text-white p-4 overflow-auto">
+          <div className="max-w-3xl mx-auto">
+            <div className="text-xl font-bold mb-2">Client Error Captured</div>
+            <div className="text-sm text-rose-200 mb-3">
+              {runtimeErr.type}: {runtimeErr.msg}
+            </div>
+            <pre className="text-xs whitespace-pre-wrap bg-white/5 border border-white/10 rounded-xl p-3">
+{runtimeErr.stack || '(no stack)'}
+            </pre>
+            <div className="mt-4 flex gap-2">
+              <button className="px-4 py-2 rounded-xl bg-white text-black font-semibold" onClick={() => setRuntimeErr(null)}>
+                닫기
+              </button>
+              <button
+                className="px-4 py-2 rounded-xl bg-white/10 border border-white/10 font-semibold"
+                onClick={async () => {
+                  const text = `${runtimeErr.type}: ${runtimeErr.msg}\n\n${runtimeErr.stack || ''}`;
+                  try { await navigator.clipboard.writeText(text); } catch {}
+                }}
+              >
+                복사
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {/* overlay */}
       <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-black/10 pointer-events-none" />
@@ -1605,7 +1508,7 @@ export default function Page() {
                 className="w-11 h-11 rounded-full bg-black/45 border border-white/10 hover:border-white/20 backdrop-blur-md flex items-center justify-center"
                 aria-label="save"
               >
-                <HardDrive className="w-5 h-5 text-gray-200" />
+                <Save className="w-5 h-5 text-gray-200" />
               </button>
 
               <button
@@ -1639,10 +1542,9 @@ export default function Page() {
           </div>
         </div>
 
-        {/* CE bar */}
         {view.isCE ? (
           <div className="px-4 mt-3">
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border bg-blue-950/70 border-blue-500/40 text-blue-200 backdrop-blur-md">
+            <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full border backdrop-blur-md ${'bg-blue-950/70 border-blue-500/40 text-blue-200'}`}>
               <AlertCircle className="w-4 h-4" />
               <span className="text-xs font-semibold" style={{ fontFamily: 'Inter, sans-serif' }}>
                 {view.ceTitle} · {view.ceIndex + 1}/{view.ceTotal} {weakNow ? '· 약점' : ''}
@@ -1692,7 +1594,6 @@ export default function Page() {
       <div className="absolute bottom-0 left-0 right-0 z-40 safe-bottom">
         <div className="p-4 md:p-6">
           <div className="max-w-5xl mx-auto">
-            {/* name tag */}
             {speaker?.name ? (
               <div className="mb-2 ml-2">
                 <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-t-xl bg-black/60 border border-white/10">
@@ -1716,7 +1617,6 @@ export default function Page() {
                 {view.text}
               </div>
 
-              {/* actions inside box (no overlap) */}
               {view.isCE ? (
                 <div className="mt-5 flex flex-wrap gap-2">
                   <button
@@ -1799,9 +1699,7 @@ export default function Page() {
           setExamineKey(key);
           setExamineOpen(true);
         }}
-        onOpenCombine={() => {
-          setCombineOpen(true);
-        }}
+        onOpenCombine={() => setCombineOpen(true)}
         onOpenAdmission={(key) => openAdmission(key)}
       />
 
@@ -1817,8 +1715,8 @@ export default function Page() {
         evidenceMap={game.evidence}
         a={combineA}
         b={combineB}
-        onPickA={(k) => (k === combineB ? setCombineB(null) : null, setCombineA(k))}
-        onPickB={(k) => (k === combineA ? setCombineA(null) : null, setCombineB(k))}
+        onPickA={(k) => setCombineA(k)}
+        onPickB={(k) => setCombineB(k)}
         onApply={applyCombine}
       />
 
@@ -1859,4 +1757,27 @@ export default function Page() {
       />
     </div>
   );
+}
+
+/* =========================================================
+   11) Admission helpers (pure)
+========================================================= */
+function requestAdmission(adm, evidenceKey) {
+  if (adm.admitted.has(evidenceKey)) return { state: adm, requestId: null };
+  const next = { ...adm, pending: new Map(adm.pending) };
+  const requestId = uid('adm');
+  next.pending.set(requestId, { requestId, evidenceKey, objections: [] });
+  return { state: next, requestId };
+}
+function ruleAdmission(adm, requestId, decision) {
+  const next = { ...adm, admitted: new Set(adm.admitted), denied: new Map(adm.denied), pending: new Map(adm.pending) };
+  const req = next.pending.get(requestId);
+  if (!req) return next;
+  next.pending.delete(requestId);
+  if (decision === 'ADMIT') next.admitted.add(req.evidenceKey);
+  if (decision === 'DENY') next.denied.set(req.evidenceKey, { ts: now(), evidenceKey: req.evidenceKey, rationale: 'denied' });
+  return next;
+}
+function now() {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now();
   }
