@@ -15,26 +15,10 @@ import {
   Timer,
 } from 'lucide-react';
 
-/**
- * ✅ 단일 파일(app/page.js) — “INSANE SPEED” 법정 진실공방
- * 핵심 추가:
- * - 심문(statement)마다 타이머(속도 압박) + 자동 패널티/자동 진행
- * - 정답 빠르게 맞출수록 콤보/배율/시간보너스↑ (스피드 게임 루프)
- * - SpeedLines Canvas + vignette + micro shake/flash + 버튼 스케일(모바일 감성)
- * - BGM도 속도(배율)에 따라 미세하게 긴장감 변조(간단 WebAudio)
- *
- * 조작:
- * - 화면 탭: 다음
- * - 심문 중: [추궁] / [증거 제시]
- * - 약점 문장(weak)에서 올바른 증거 제시 시 정답
- * - 타이머 만료/오답: HP 감소
- */
-
 /* =========================
    0) utils
 ========================= */
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 const uid = (p = 'id') => `${p}_${Math.random().toString(36).slice(2, 8)}_${Date.now().toString(36)}`;
 const safeGet = (obj, path, fallback) => {
   try {
@@ -55,9 +39,6 @@ function useLatestRef(value) {
     r.current = value;
   }, [value]);
   return r;
-}
-function lerp(a, b, t) {
-  return a + (b - a) * t;
 }
 
 /* =========================
@@ -157,7 +138,7 @@ function useAudioEngine() {
     const ctx = ensure();
     if (!ctx || !n?.o) return;
     const sf = clamp(speedFactor ?? 0, 0, 1);
-    const target = n.baseFreq * (1 + 0.18 * sf); // 미세 가속
+    const target = n.baseFreq * (1 + 0.18 * sf);
     try {
       n.o.frequency.setTargetAtTime(target, ctx.currentTime, 0.08);
       if (n.g) {
@@ -223,7 +204,6 @@ const GAME_DB = {
     objection: { freq: 1080, dur: 0.07, vol: 0.08, type: 'square' },
     flash: { freq: 760, dur: 0.03, vol: 0.03, type: 'triangle' },
     tick: { freq: 1280, dur: 0.02, vol: 0.02, type: 'sine' },
-    rush: { freq: 640, dur: 0.04, vol: 0.03, type: 'triangle' },
   },
   characters: {
     judge: {
@@ -308,14 +288,9 @@ const GAME_DB = {
     phone_ping: { name: '휴대폰 기지국 기록', icon: '📶', desc: '20:33~20:52 인근 기지국 체류. 실내/실외 구분 불가.' },
     delivery_receipt: { name: '배달 영수증', icon: '🧾', desc: '20:46 “14층 1402호 문앞” 전달. 서명 없음.' },
     parking_ticket: { name: '주차정산 기록', icon: '🅿️', desc: '20:37 정산 완료. 차량 출차 20:39.' },
-    usb_photo: { name: 'USB 사진(시간정보)', icon: '💾', desc: '20:36 촬영 메타데이터. 단, 카메라 시계 오차 가능.' },
     printer_log: { name: '프린터 출력 로그', icon: '🖨️', desc: '20:34 “14F-공용프린터” 출력 2장. 사용자 인증 토큰 “A-Temp”.' },
     temp_token: { name: '임시 인증 토큰', icon: '🔑', desc: 'IT가 발급한 1회용 토큰. 발급자/수령자 기록이 불완전.' },
-    blood_trace: { name: '혈흔 감정서', icon: '🩸', desc: '피고인 신발에서 미량 혈흔. 2차 전이 가능성 있음.' },
     tool_mark: { name: '둔기(조각상) 감정', icon: '🗿', desc: '사무실 장식 조각상. 손잡이 부분 마모, 지문 불명확.' },
-    note_fragment: { name: '쪽지 조각', icon: '🧩', desc: '“20:40… 로비… (찢김)” 필기.' },
-    trash_cctv: { name: '쓰레기장 CCTV', icon: '📹', desc: '20:44 누군가 봉투 투척. 얼굴 가림.' },
-    bag_receipt: { name: '봉투 구매 영수증', icon: '🛍️', desc: '20:32 편의점 봉투 구매. 결제수단 익명(현금).' },
   },
   cases: [
     {
@@ -364,6 +339,7 @@ const GAME_DB = {
             },
           ],
         },
+
         { type: 'anim', name: 'objection', sfxKey: 'objection' },
         { type: 'talk', charKey: 'player', text: '이의 있습니다!', size: 'text-3xl', color: 'text-blue-400' },
         { type: 'talk', charKey: 'player', text: 'CCTV는 “고스란히” 남지 않습니다. 구조적으로 사각이 있습니다.' },
@@ -372,59 +348,18 @@ const GAME_DB = {
 
         {
           type: 'trial',
-          title: '배달기사 김○○의 증언 ② (문앞 전달)',
-          witnessCharKey: 'witness2',
-          bgKey: 'hall',
-          statements: [
-            { text: '저는 20:46에 14층 1402호 문앞에 물건을 내려놨습니다.' },
-            { text: '초인종을 눌렀지만 아무도 응답하지 않았습니다.' },
-            { text: '그래서 “문앞” 전달로 처리했습니다. 서명은 없습니다.' },
-            { text: '현관 앞 복도는 조용했고, 인기척이 없었습니다.' },
-            { text: '그 시간대에 누군가 문을 열었다면 저는 들었을 겁니다.' },
-            { text: '따라서 20:46에는 1402 내부에 아무도 없었습니다.' },
-            { text: '피고인이 20:58에 로비에 있었다면, 20:46엔 확실히 그 층에 없죠.' },
-            { text: '그러니까 검사가 말하는 “20:58 이전 살해 준비”는 말이 안 됩니다.' },
-            { text: '제 영수증에도 20:46이 찍혀 있습니다.' },
-            {
-              text: '결론: 20:46 시점, 피고인이 14층에 있었다는 주장은 성립하지 않습니다.',
-              weak: true,
-              contradictionEvidenceKey: 'elevator_log',
-              failMsg: '배달 시각은 고정이지만, “피고인이 층에 없었다”는 결론은 로그로 깨질 수 있다.',
-              pressQ: '당신은 엘리베이터를 이용했습니까?',
-              press: [
-                { charKey: 'witness2', text: '네. 보통은 카드 태그 없이 호출됩니다.', face: 'normal' },
-                { charKey: 'player', text: '(카드 태그가 없다는 건, “기록이 없다”는 의미가 아니다.)' },
-              ],
-            },
-          ],
-        },
-        { type: 'anim', name: 'objection', sfxKey: 'objection' },
-        { type: 'talk', charKey: 'player', text: '잠깐만요. “기록이 없다”가 “이동이 없다”가 아닙니다.', size: 'text-2xl' },
-        { type: 'talk', charKey: 'prosecutor', text: '변호인, 당신이 오히려 검찰을 돕는군요?' },
-        { type: 'talk', charKey: 'player', text: '(좋아. 첫 반전이다. 이동은 “비상모드”로 가능하다.)' },
-
-        {
-          type: 'trial',
-          title: '검시관 서○○의 증언 ③ (사망시각)',
+          title: '검시관 서○○의 증언 ② (사망시각)',
           witnessCharKey: 'witness3',
           bgKey: 'tense',
           statements: [
             { text: '피해자의 직접 사인은 둔기성 두부 손상입니다.' },
-            { text: '현장 둔기로는 장식 조각상이 의심됩니다.' },
-            { text: '외상 형태는 조각상 손잡이와 부합합니다.' },
-            { text: '피해자 주변에는 격렬한 몸싸움 흔적이 제한적입니다.' },
             { text: '사망 추정시각은 21:10을 중심으로 ±20분입니다.' },
-            { text: '이 범위는 통상적인 체온/경직 소견에 기반합니다.' },
             { text: '따라서 20:50 이전 사망은 가능성이 낮습니다.' },
-            { text: '로비 CCTV 20:58과 시간대가 정합합니다.' },
-            { text: '게다가 21:05에 피고인의 카드 재출입이 있습니다.' },
-            { text: '사망 직전 재출입 → 범행 기회는 충분합니다.' },
-            { text: '이 사건은 시간축이 명확합니다.' },
             {
               text: '즉, 사망시각을 흔들 증거는 없습니다.',
               weak: true,
               contradictionEvidenceKey: 'revised_autopsy',
-              failMsg: '사망시각은 “보완 소견서”가 핵심이다. 아직 법정에 제출되지 않았다면, 제출을 요구해야 한다.',
+              failMsg: '사망시각은 “보완 소견서”가 핵심이다.',
               pressQ: '당신은 “위 내용물 분석”을 했습니까?',
               press: [
                 { charKey: 'witness3', text: '초기에는 제한적이었습니다. 보완 분석은…', face: 'sweat' },
@@ -433,152 +368,14 @@ const GAME_DB = {
             },
           ],
         },
-        { type: 'anim', name: 'objection', sfxKey: 'objection' },
-        { type: 'talk', charKey: 'player', text: '이의 있습니다! 검시관의 말은 “초기 소견”에 불과합니다!', size: 'text-3xl', color: 'text-red-500' },
-        { type: 'talk', charKey: 'player', text: '보완 소견서에 따르면 사망 추정시각이 20:35±15로 수정됩니다!' },
-        { type: 'talk', charKey: 'prosecutor', text: '…수정? 그럼 로비 CCTV 20:58은 “사후 움직임”이 된다.' },
-        { type: 'talk', charKey: 'judge', text: '시간축이 뒤집혔군요. 이제 누가 “20:58의 인물”인지가 더 중요해졌습니다.' },
 
-        {
-          type: 'trial',
-          title: '경비원 박○○의 증언 ④ (식별)',
-          witnessCharKey: 'witness1',
-          bgKey: 'hall',
-          statements: [
-            { text: '저는 20:58의 인물이 피고인이라고 계속 생각합니다.' },
-            { text: '모자, 코트, 체형이 유사합니다.' },
-            { text: '피고인의 카드기록도 20:28, 21:05로 연결됩니다.' },
-            { text: '피고인은 20:33~20:52 기지국 기록도 근처입니다.' },
-            { text: '즉, 피고인은 “그 주변”에 있었습니다.' },
-            { text: '사망시각이 20:35로 당겨져도, 피고인은 여전히 의심됩니다.' },
-            { text: '저는 현장에서 20:58의 인물을 똑똑히 봤습니다.' },
-            {
-              text: '따라서 20:58 인물은 피고인으로 확정됩니다.',
-              weak: true,
-              contradictionEvidenceKey: 'cctv_lobby',
-              failMsg: '“확정”을 깨려면 로비 CCTV 캡처의 식별 불가능성을 드러내야 한다.',
-              pressQ: '당신은 어느 거리에서 봤습니까?',
-              press: [
-                { charKey: 'witness1', text: '…로비 기둥 뒤쪽에서요. 조명이 좀…', face: 'sweat' },
-                { charKey: 'player', text: '(조명. 반사. 화질. “확정”은 무리다.)' },
-              ],
-            },
-          ],
-        },
         { type: 'anim', name: 'objection', sfxKey: 'objection' },
-        { type: 'talk', charKey: 'player', text: '확정? 불가능합니다.', size: 'text-3xl', color: 'text-blue-400' },
-        { type: 'talk', charKey: 'player', text: '로비 CCTV 캡처는 얼굴 식별이 되지 않습니다. “확정”은 추정입니다.' },
-        { type: 'talk', charKey: 'prosecutor', text: '좋다. 그럼 남는 건 “출입기록”이다. 피고인이 20:28에 14층에 들어간 건 사실이다.' },
+        { type: 'talk', charKey: 'player', text: '이의 있습니다! 보완 소견서가 있습니다!', size: 'text-3xl', color: 'text-red-500' },
+        { type: 'talk', charKey: 'judge', text: '시간축이 뒤집혔군요.' },
 
-        {
-          type: 'trial',
-          title: 'IT관리자 정○○의 증언 ⑤ (기록의 의미)',
-          witnessCharKey: 'witness4',
-          bgKey: 'press',
-          statements: [
-            { text: '출입문 카드기록은 “카드가 태그된 순간”만 남습니다.' },
-            { text: '피고인 카드: 20:28 14층 출입, 21:05 재출입입니다.' },
-            { text: '그 사이에 피고인이 나갔다면 기록이 있어야 합니다.' },
-            { text: '그러나 20:28 이후 “피고인 카드로” 나간 기록은 없습니다.' },
-            { text: '즉, 피고인은 20:28부터 21:05까지 14층에 있었다고 보는 게 합리적입니다.' },
-            { text: '엘리베이터 로그의 “비상모드”는 드문 상황입니다.' },
-            { text: '비상모드는 관리 권한이 있어야 합니다.' },
-            { text: '또한 비상모드라고 해도 흔적은 남습니다.' },
-            { text: '따라서 기록을 뒤집기 어렵습니다.' },
-            {
-              text: '결론: 기록상 피고인의 알리바이는 성립하지 않습니다.',
-              weak: true,
-              contradictionEvidenceKey: 'printer_log',
-              failMsg: '“기록=절대”를 깨는 건 동일 시스템의 다른 로그(프린터/토큰)이다.',
-              pressQ: '당신은 “임시토큰(A-Temp)”을 아십니까?',
-              press: [
-                { charKey: 'witness4', text: '그건… 일회용 인증 토큰입니다.', face: 'sweat' },
-                { charKey: 'player', text: '(드물다? 하지만 존재한다. 그 순간 기록 신뢰도가 흔들린다.)' },
-              ],
-            },
-          ],
-        },
-        { type: 'anim', name: 'objection', sfxKey: 'objection' },
-        { type: 'talk', charKey: 'player', text: '기록이 “절대”라면, 이 로그는 뭡니까?', size: 'text-3xl', color: 'text-red-500' },
-        { type: 'talk', charKey: 'player', text: '20:34 공용 프린터 출력. 사용자 토큰은 “A-Temp”입니다!' },
-        { type: 'talk', charKey: 'prosecutor', text: '…임시토큰이 사용됐다면, 누군가 “권한”을 갖고 시스템을 조작했을 가능성도 있다.' },
-        { type: 'talk', charKey: 'judge', text: '그럼 쟁점은 “누가 임시토큰을 썼는가”로 이동합니다.' },
-
-        {
-          type: 'trial',
-          title: 'IT관리자 정○○의 증언 ⑥ (임시토큰의 행방)',
-          witnessCharKey: 'witness4',
-          bgKey: 'tense',
-          isFinal: true,
-          statements: [
-            { text: 'A-Temp는 제가 발급할 수 있는 일회용 토큰입니다.' },
-            { text: '보통은 출입기 오류나 프린터 인증 오류 때 씁니다.' },
-            { text: '20:34 토큰 사용은 “누군가 요청”했음을 의미합니다.' },
-            { text: '그 요청자는 현장 근처에 있었을 가능성이 큽니다.' },
-            { text: '피고인이 14층에 있었다면, 피고인이 요청했을 수도 있습니다.' },
-            { text: '저는 그날 “피고인에게 토큰을 줬다”고 기억합니다.' },
-            { text: '따라서 토큰 사용자도 피고인일 겁니다.' },
-            { text: '피고인이 토큰으로 프린터를 쓰고, 그 후 범행했을 수 있습니다.' },
-            { text: '이건 시스템상 가장 자연스러운 설명입니다.' },
-            {
-              text: '결론: A-Temp는 피고인의 손에 있었고, 사건 시간대와 일치합니다.',
-              weak: true,
-              contradictionEvidenceKey: 'temp_token',
-              failMsg: '“기억”을 깨려면 “발급 기록 불완전” 자체가 증거다.',
-              pressQ: '발급 로그에 “수령자”가 남습니까?',
-              press: [
-                { charKey: 'witness4', text: '…정상이라면 남지만, 그날은 시스템 점검 중이라…', face: 'sweat' },
-                { charKey: 'player', text: '(점검 중? 그럼 “기억”은 증거가 아니다.)' },
-              ],
-            },
-          ],
-        },
-        { type: 'anim', name: 'objection', sfxKey: 'objection' },
-        { type: 'talk', charKey: 'player', text: '이의 있습니다. “기억”은 증거가 아닙니다!', size: 'text-3xl', color: 'text-blue-400' },
-        { type: 'talk', charKey: 'player', text: '임시토큰은 발급/수령자 기록이 불완전합니다. 즉, 피고인에게 갔다고 “증명”되지 않습니다.' },
-        { type: 'talk', charKey: 'prosecutor', text: '그래도 피고인은 기지국 기록이 20:33~20:52 “근처”다.' },
-        { type: 'talk', charKey: 'player', text: '근처는 “근처”일 뿐. 그래서 저는 시간축을 “물리적으로” 고정하겠습니다.' },
-
-        {
-          type: 'trial',
-          title: '최후의 논리 ⑦ (시간축 고정)',
-          witnessCharKey: 'witness3',
-          bgKey: 'tense',
-          isFinal: true,
-          statements: [
-            { text: '보완 소견서에 따르면 사망 추정시각은 20:35±15입니다.' },
-            { text: '즉, 20:20~20:50 사이에 사망했을 가능성이 큽니다.' },
-            { text: '이 시간대는 배달(20:46)과 겹칩니다.' },
-            { text: '하지만 배달은 “문앞” 전달이라 실내를 확인하지 못했습니다.' },
-            { text: '따라서 범행은 20:35 전후에도 가능했습니다.' },
-            { text: '그럼 피고인의 위치가 핵심이 됩니다.' },
-            { text: '기지국 기록은 실내/실외를 구분하지 못합니다.' },
-            { text: '출입기록은 카드 태그가 없으면 공백이 생깁니다.' },
-            { text: '따라서 “결정적”인 것은 제3의 고정 기록입니다.' },
-            {
-              text: '그런 고정 기록은 존재하지 않습니다.',
-              weak: true,
-              contradictionEvidenceKey: 'parking_ticket',
-              failMsg: '시간축 고정의 마지막 퍼즐은 “주차정산/출차”다.',
-              pressQ: '당신은 사건일지를 전체로 봤습니까?',
-              press: [
-                { charKey: 'witness3', text: '검시는… 의학 소견입니다. 다른 기록은 수사 파트죠.', face: 'normal' },
-                { charKey: 'player', text: '(좋아. 의학은 시간 “범위”를 주고, 고정은 다른 기록이 한다.)' },
-              ],
-            },
-          ],
-        },
-        { type: 'anim', name: 'objection', sfxKey: 'objection' },
-        { type: 'talk', charKey: 'player', text: '존재합니다. “주차정산 기록”.', size: 'text-4xl text-red-500' },
-        { type: 'talk', charKey: 'player', text: '20:37 정산 완료, 20:39 출차. 사망 범위(20:20~20:50) 한복판입니다.' },
-        { type: 'talk', charKey: 'prosecutor', text: '…피고인이 출차했다면, 14층에 있을 수 없다. 그럼 20:28 출입 이후 이동은?' },
-        { type: 'talk', charKey: 'player', text: '바로 그 지점에서 “비상모드/임시토큰”이 의미를 갖습니다.' },
-        { type: 'talk', charKey: 'judge', text: '검찰은 “확정”을 말했고, 변호인은 “고정 기록”으로 시간을 잠갔습니다.' },
-        { type: 'talk', charKey: 'judge', text: '이 법정은 합리적 의심을 배제할 만큼의 입증이 부족하다고 판단합니다.' },
         { type: 'scene', bgKey: 'ending', bgmKey: 'victory' },
         { type: 'anim', name: 'victory', sfxKey: 'success' },
         { type: 'talk', charKey: 'judge', text: '피고인에게 무죄를 선고합니다.', size: 'text-3xl' },
-        { type: 'talk', charKey: 'narrator', text: '사건은 “완전한 진범 특정” 없이도, 법정에서 뒤집혔다.' },
         { type: 'end', text: 'THE END' },
       ],
     },
@@ -680,10 +477,10 @@ function SpeedLines({ intensity = 0, pulse = 0, danger = 0 }) {
 
       const cx = w * 0.5;
       const cy = h * 0.42;
-      const n = Math.floor(40 + intensity * 220);
+      const n = Math.floor(38 + intensity * 200);
 
-      // 중심 글로우(속도 체감)
-      const glow = 0.08 + intensity * 0.24 + pulse * 0.18;
+      // glow
+      const glow = 0.06 + intensity * 0.22 + pulse * 0.16;
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
       ctx.globalAlpha = glow;
@@ -693,24 +490,25 @@ function SpeedLines({ intensity = 0, pulse = 0, danger = 0 }) {
       ctx.fill();
       ctx.restore();
 
-      // 라인
+      // lines
       ctx.save();
       ctx.translate(cx, cy);
       ctx.globalCompositeOperation = 'lighter';
 
-      const baseA = 0.06 + intensity * 0.22 + pulse * 0.18;
-      ctx.globalAlpha = clamp(baseA, 0, 0.55);
+      const baseA = 0.05 + intensity * 0.20 + pulse * 0.16;
+      ctx.globalAlpha = clamp(baseA, 0, 0.5);
 
+      const minDim = Math.min(w, h);
       for (let i = 0; i < n; i++) {
         const a = ((i / n) * Math.PI * 2 + t * 0.9) % (Math.PI * 2);
-        const r1 = (0.04 + Math.random() * 0.12) * Math.min(w, h);
-        const r2 = (0.25 + Math.random() * 0.55 + intensity * 0.25) * Math.min(w, h);
+        const r1 = (0.05 + Math.random() * 0.12) * minDim;
+        const r2 = (0.22 + Math.random() * 0.58 + intensity * 0.22) * minDim;
         const x1 = Math.cos(a) * r1;
         const y1 = Math.sin(a) * r1;
         const x2 = Math.cos(a) * r2;
         const y2 = Math.sin(a) * r2;
 
-        const lw = (1 + intensity * 2.4) * dprRef.current * (0.6 + Math.random() * 1.2);
+        const lw = (1 + intensity * 2.2) * dprRef.current * (0.55 + Math.random() * 1.15);
         ctx.lineWidth = lw;
         ctx.strokeStyle =
           danger > 0.6
@@ -725,14 +523,14 @@ function SpeedLines({ intensity = 0, pulse = 0, danger = 0 }) {
 
       ctx.restore();
 
-      // 비네팅
+      // vignette
       ctx.save();
       const v = 0.55 + intensity * 0.35;
-      const grad = ctx.createRadialGradient(cx, cy, Math.min(w, h) * 0.15, cx, cy, Math.min(w, h) * v);
+      const grad = ctx.createRadialGradient(cx, cy, minDim * 0.15, cx, cy, minDim * v);
       grad.addColorStop(0, 'rgba(0,0,0,0)');
       grad.addColorStop(1, danger > 0.6 ? 'rgba(0,0,0,0.78)' : 'rgba(0,0,0,0.7)');
       ctx.fillStyle = grad;
-      ctx.globalAlpha = 0.75;
+      ctx.globalAlpha = 0.78;
       ctx.fillRect(0, 0, w, h);
       ctx.restore();
     };
@@ -744,13 +542,21 @@ function SpeedLines({ intensity = 0, pulse = 0, danger = 0 }) {
     };
   }, [intensity, pulse, danger]);
 
-  return <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none z-[5]" />;
+  return <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none z-[3]" />;
 }
 
 /* =========================
-   5) UI bits
+   5) HUD (정렬된 상단)
 ========================= */
-function TopPills({
+function HudPill({ children, className = '' }) {
+  return (
+    <div className={`hud-pill ${className}`}>
+      <div className="hud-pill-inner">{children}</div>
+    </div>
+  );
+}
+
+function TopHUD({
   hp,
   hpMax,
   evCount,
@@ -767,85 +573,87 @@ function TopPills({
   danger,
 }) {
   const tP = timeMax > 0 ? clamp(timeLeft / timeMax, 0, 1) : 1;
-  const barGlow = danger > 0.6 ? 'shadow-red-500/40' : 'shadow-blue-500/40';
   const barFrom = danger > 0.6 ? 'from-red-400' : 'from-blue-400';
   const barTo = danger > 0.6 ? 'to-amber-300' : 'to-cyan-300';
 
   return (
-    <>
-      <div className="absolute top-6 left-6 z-50 flex items-center gap-3">
-        <div className="flex items-center gap-3 bg-black/40 backdrop-blur-md px-5 py-3 rounded-full border border-white/10">
-          <Scale className="w-5 h-5 text-blue-400" strokeWidth={2} />
-          <div className="flex gap-1.5">
-            {[...Array(hpMax)].map((_, i) => (
-              <div
-                key={i}
-                className={`w-2 h-2 rounded-full transition-all duration-300 ${
-                  i < hp ? 'bg-blue-400 shadow-lg shadow-blue-400/50' : 'bg-gray-700'
-                }`}
-              />
-            ))}
-          </div>
+    <div className="hud-root">
+      <div className="hud-row">
+        <div className="hud-left">
+          <HudPill>
+            <div className="flex items-center gap-3">
+              <Scale className="w-5 h-5 text-blue-400" strokeWidth={2} />
+              <div className="flex gap-1.5">
+                {[...Array(hpMax)].map((_, i) => (
+                  <div
+                    key={i}
+                    className={`w-2 h-2 rounded-full transition-all duration-300 ${
+                      i < hp ? 'bg-blue-400 shadow-lg shadow-blue-400/50' : 'bg-gray-700'
+                    }`}
+                  />
+                ))}
+              </div>
+            </div>
+          </HudPill>
+
+          <HudPill className="hidden md:block">
+            <div className="flex items-center gap-2">
+              <Gavel className="w-5 h-5 text-gray-200" />
+              <span className="text-sm font-semibold text-white" style={{ fontFamily: 'Inter, sans-serif' }}>
+                TURN {turn}
+              </span>
+            </div>
+          </HudPill>
         </div>
 
-        <div className="hidden md:flex items-center gap-2 bg-black/40 backdrop-blur-md px-5 py-3 rounded-full border border-white/10">
-          <Gavel className="w-5 h-5 text-gray-200" />
-          <span className="text-sm font-semibold text-white" style={{ fontFamily: 'Inter, sans-serif' }}>
-            TURN {turn}
-          </span>
+        <div className="hud-center">
+          <HudPill className="w-[18.5rem] md:w-[22rem]">
+            <div className="flex items-center gap-3 w-full">
+              <Timer className={`w-5 h-5 ${danger > 0.6 ? 'text-red-300' : 'text-cyan-200'}`} />
+              <div className="flex-1 h-2 rounded-full bg-white/10 overflow-hidden">
+                <div
+                  className={`h-full rounded-full bg-gradient-to-r ${barFrom} ${barTo} shadow-md`}
+                  style={{ width: `${Math.floor(tP * 100)}%`, transition: 'width 120ms linear' }}
+                />
+              </div>
+              <span className={`text-xs font-black tabular-nums ${danger > 0.6 ? 'text-red-200' : 'text-cyan-100'}`}>
+                {timeLeft.toFixed(1)}s
+              </span>
+            </div>
+          </HudPill>
+
+          <HudPill className="hidden md:block">
+            <div className="flex items-center gap-2">
+              <Zap className="w-5 h-5 text-amber-300" />
+              <span className="text-sm font-black text-white tabular-nums" style={{ fontFamily: 'Inter, sans-serif' }}>
+                x{mult.toFixed(2)}
+              </span>
+              <span className="text-xs font-semibold text-amber-200/90 tabular-nums ml-2">COMBO {combo}</span>
+              <span className="text-[10px] text-white/70 tabular-nums ml-2">{Math.floor(speed * 100)}%</span>
+            </div>
+          </HudPill>
+        </div>
+
+        <div className="hud-right">
+          <button onClick={onToggleMute} className="hud-icon tap-scale" aria-label="mute">
+            {muted ? <VolumeX className="w-5 h-5 text-gray-200" /> : <Volume2 className="w-5 h-5 text-gray-200" />}
+          </button>
+
+          <button onClick={onOpenEvidence} className="hud-action tap-scale" aria-label="evidence">
+            <FileText className="w-5 h-5 text-amber-400" strokeWidth={2} />
+            <span className="text-sm font-semibold text-white tabular-nums" style={{ fontFamily: 'Inter, sans-serif' }}>
+              {evCount} / {evMax}
+            </span>
+          </button>
         </div>
       </div>
-
-      <div className="absolute top-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3">
-        <div className="flex items-center gap-3 bg-black/40 backdrop-blur-md px-5 py-3 rounded-full border border-white/10">
-          <Timer className={`w-5 h-5 ${danger > 0.6 ? 'text-red-300' : 'text-cyan-200'}`} />
-          <div className="w-44 md:w-56 h-2 rounded-full bg-white/10 overflow-hidden">
-            <div
-              className={`h-full rounded-full bg-gradient-to-r ${barFrom} ${barTo} ${barGlow} shadow-md`}
-              style={{
-                width: `${Math.floor(tP * 100)}%`,
-                transition: 'width 120ms linear',
-              }}
-            />
-          </div>
-          <span className={`text-xs font-bold tabular-nums ${danger > 0.6 ? 'text-red-200' : 'text-cyan-100'}`}>
-            {timeLeft.toFixed(1)}s
-          </span>
-        </div>
-
-        <div className="hidden md:flex items-center gap-2 bg-black/40 backdrop-blur-md px-5 py-3 rounded-full border border-white/10">
-          <Zap className="w-5 h-5 text-amber-300" />
-          <span className="text-sm font-black text-white tabular-nums" style={{ fontFamily: 'Inter, sans-serif' }}>
-            x{mult.toFixed(2)}
-          </span>
-          <span className="text-xs font-semibold text-amber-200/90 tabular-nums">COMBO {combo}</span>
-          <span className="text-[10px] text-white/70 tabular-nums">{Math.floor(speed * 100)}%</span>
-        </div>
-      </div>
-
-      <div className="absolute top-6 right-6 z-50 flex items-center gap-3">
-        <button
-          onClick={onToggleMute}
-          className="tap-scale flex items-center justify-center w-11 h-11 rounded-full bg-black/40 backdrop-blur-md border border-white/10 hover:border-white/20 transition-all"
-          aria-label="mute"
-        >
-          {muted ? <VolumeX className="w-5 h-5 text-gray-200" /> : <Volume2 className="w-5 h-5 text-gray-200" />}
-        </button>
-
-        <button
-          onClick={onOpenEvidence}
-          className="tap-scale flex items-center gap-3 bg-black/40 backdrop-blur-md px-5 py-3 rounded-full border border-white/10 hover:border-white/20 transition-all"
-        >
-          <FileText className="w-5 h-5 text-amber-400" strokeWidth={2} />
-          <span className="text-sm font-semibold text-white tabular-nums" style={{ fontFamily: 'Inter, sans-serif' }}>
-            {evCount} / {evMax}
-          </span>
-        </button>
-      </div>
-    </>
+    </div>
   );
 }
 
+/* =========================
+   6) UI bits
+========================= */
 function EffectLayer({ effectText, flash, overlayMsg, speedPulse, danger }) {
   return (
     <>
@@ -871,7 +679,7 @@ function EffectLayer({ effectText, flash, overlayMsg, speedPulse, danger }) {
       )}
 
       {overlayMsg && (
-        <div className="absolute inset-0 z-[95] flex items-start justify-center pt-28 pointer-events-none">
+        <div className="absolute inset-0 z-[95] flex items-start justify-center pt-[calc(var(--hud-h)+var(--safe-top)+12px)] pointer-events-none">
           <div
             className={`px-5 py-3 rounded-2xl backdrop-blur-xl text-white text-sm font-semibold animate-fade-in ${
               danger > 0.6 ? 'bg-red-900/60 border border-red-400/20' : 'bg-black/70 border border-white/10'
@@ -884,10 +692,9 @@ function EffectLayer({ effectText, flash, overlayMsg, speedPulse, danger }) {
 
       {flash && <div className="absolute inset-0 z-[90] bg-white/20 pointer-events-none" />}
 
-      {/* speed micro flash */}
       {speedPulse > 0.001 && (
         <div
-          className="absolute inset-0 z-[6] pointer-events-none"
+          className="absolute inset-0 z-[4] pointer-events-none"
           style={{
             background:
               danger > 0.6
@@ -905,13 +712,13 @@ function CharacterAvatar({ char, face, speed }) {
   const src = char.avatars?.[face] || char.avatar || null;
   const wobble = 1 + speed * 0.02;
   return (
-    <div className="absolute bottom-80 left-1/2 transform -translate-x-1/2 z-10 animate-fade-in pointer-events-none">
-      <div className="relative" style={{ transform: `scale(${wobble})` }}>
+    <div className="absolute bottom-[calc(160px+var(--safe-bot)+140px)] left-1/2 -translate-x-1/2 z-10 pointer-events-none">
+      <div className="relative animate-fade-in" style={{ transform: `scale(${wobble})` }}>
         <div className="absolute inset-0 rounded-full blur-2xl opacity-30" style={{ backgroundColor: char.color }} />
         {src ? (
-          <img src={src} alt={char.name} className="relative w-32 h-32 rounded-full border-2 border-white/20 shadow-2xl" />
+          <img src={src} alt={char.name} className="relative w-28 h-28 md:w-32 md:h-32 rounded-full border-2 border-white/20 shadow-2xl" />
         ) : (
-          <div className="relative w-32 h-32 rounded-full border-2 border-white/20 shadow-2xl bg-white/5" />
+          <div className="relative w-28 h-28 md:w-32 md:h-32 rounded-full border-2 border-white/20 shadow-2xl bg-white/5" />
         )}
       </div>
     </div>
@@ -920,9 +727,9 @@ function CharacterAvatar({ char, face, speed }) {
 
 function CrossExamPill({ title, isFinal, cur, total, witnessName, combo, mult, danger }) {
   return (
-    <div className="absolute top-28 left-1/2 transform -translate-x-1/2 z-20 animate-slide-up">
+    <div className="ce-pill">
       <div
-        className={`px-7 py-3 rounded-full border backdrop-blur-md ${
+        className={`px-6 py-3 rounded-full border backdrop-blur-md ${
           isFinal ? 'bg-red-950/80 border-red-500/50 text-red-200' : 'bg-blue-950/80 border-blue-500/50 text-blue-200'
         }`}
       >
@@ -954,7 +761,7 @@ function DialogueBox({
   danger,
 }) {
   return (
-    <div onClick={onNext} className="absolute bottom-0 left-0 right-0 p-6 md:p-8 z-30 transition-all duration-500">
+    <div onClick={onNext} className="dialogue-wrap">
       <div className="max-w-5xl mx-auto">
         {char && (
           <div className="mb-3 ml-4">
@@ -980,7 +787,7 @@ function DialogueBox({
           </p>
 
           {isCE && !pressMode && (
-            <div className="absolute -top-20 right-0 flex gap-3">
+            <div className="dialogue-actions">
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -1020,15 +827,15 @@ function EvidenceModal({ items, isTrial, hint, onClose, onPresent, onReset }) {
   return (
     <div className="absolute inset-0 bg-black/95 backdrop-blur-xl z-40 overflow-y-auto">
       <div className="max-w-7xl mx-auto p-6 md:p-8">
-        <div className="flex items-center justify-between mb-10">
-          <div className="flex items-center gap-4">
-            <FileText className="w-8 h-8 text-amber-400" strokeWidth={2} />
-            <h2 className="text-3xl font-semibold text-white" style={{ fontFamily: 'Crimson Pro, serif' }}>
+        <div className="flex items-center justify-between mb-8 md:mb-10 gap-4">
+          <div className="flex items-center gap-4 min-w-0">
+            <FileText className="w-8 h-8 text-amber-400 shrink-0" strokeWidth={2} />
+            <h2 className="text-3xl font-semibold text-white truncate" style={{ fontFamily: 'Crimson Pro, serif' }}>
               증거 목록
             </h2>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 shrink-0">
             <button
               onClick={onReset}
               className="tap-scale flex items-center gap-2 px-4 py-3 bg-white/5 hover:bg-white/10 text-white font-semibold rounded-xl border border-white/10 transition-all"
@@ -1056,7 +863,7 @@ function EvidenceModal({ items, isTrial, hint, onClose, onPresent, onReset }) {
         )}
 
         {items.length === 0 ? (
-          <div className="text-center text-gray-400 py-28">
+          <div className="text-center text-gray-400 py-24 md:py-28">
             <FileText className="w-16 h-16 mx-auto mb-4 opacity-20" strokeWidth={1} />
             <p className="text-xl" style={{ fontFamily: 'Inter, sans-serif' }}>
               수집한 증거가 없습니다
@@ -1073,7 +880,7 @@ function EvidenceModal({ items, isTrial, hint, onClose, onPresent, onReset }) {
                 <div className="flex items-start gap-6">
                   <div className="text-5xl flex-shrink-0 opacity-80 group-hover:opacity-100 transition-opacity">{item.icon}</div>
                   <div className="flex-1 min-w-0">
-                    <h3 className="text-xl font-semibold text-white mb-2" style={{ fontFamily: 'Inter, sans-serif' }}>
+                    <h3 className="text-xl font-semibold text-white mb-2 truncate" style={{ fontFamily: 'Inter, sans-serif' }}>
                       {item.name}
                     </h3>
                     <p className="text-sm text-gray-400 leading-relaxed" style={{ fontFamily: 'Inter, sans-serif' }}>
@@ -1094,7 +901,7 @@ function EvidenceModal({ items, isTrial, hint, onClose, onPresent, onReset }) {
 }
 
 /* =========================
-   6) MAIN
+   7) MAIN
 ========================= */
 export default function Page() {
   const audio = useAudioEngine();
@@ -1130,7 +937,7 @@ export default function Page() {
   const [invKeys, setInvKeys] = useState(gameCase.initialEvidence || []);
 
   // SPEED GAME STATE
-  const BASE_TIME = 7.5; // statement 기본 제한시간
+  const BASE_TIME = 7.5;
   const [timeMax, setTimeMax] = useState(BASE_TIME);
   const [timeLeft, setTimeLeft] = useState(BASE_TIME);
 
@@ -1214,7 +1021,7 @@ export default function Page() {
 
   const computeSpeed = (tLeft, tMax, comboV) => {
     const tp = tMax > 0 ? clamp(tLeft / tMax, 0, 1) : 1;
-    const pressure = 1 - tp; // 0..1 (빨라질수록↑)
+    const pressure = 1 - tp;
     const streak = clamp(comboV / 12, 0, 1);
     return clamp(0.15 + pressure * 0.55 + streak * 0.45, 0, 1);
   };
@@ -1222,7 +1029,7 @@ export default function Page() {
   const speed = useMemo(() => computeSpeed(timeLeft, timeMax, combo), [timeLeft, timeMax, combo]);
   const danger = useMemo(() => {
     const tp = timeMax > 0 ? clamp(timeLeft / timeMax, 0, 1) : 1;
-    return clamp((0.35 - tp) / 0.35, 0, 1); // 0..1, 35% 이하에서 급격히 위험
+    return clamp((0.35 - tp) / 0.35, 0, 1);
   }, [timeLeft, timeMax]);
 
   const resetSpeedState = (hard = false) => {
@@ -1267,7 +1074,7 @@ export default function Page() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [speed]);
 
-  // timer tick loop (only during CE, not in modal / not locked / not pressMode)
+  // timer tick loop
   useEffect(() => {
     if (!isCE) return;
     if (evidenceMode || ceLocked || pressMode || isEnding || gameOver) return;
@@ -1281,15 +1088,9 @@ export default function Page() {
       const dt = Math.min(0.05, Math.max(0, (ts - last) / 1000));
       last = ts;
 
-      setTimeLeft((p) => {
-        const next = Math.max(0, p - dt);
-        return next;
-      });
+      setTimeLeft((p) => Math.max(0, p - dt));
 
-      // 위험 영역에서 틱
       if (danger > 0.6 && Math.random() < 0.18) sfx('tick');
-
-      // 시간 임계에서 펄스
       if (Math.random() < 0.06 && danger > 0.6) pulse(0.8);
     };
 
@@ -1298,22 +1099,22 @@ export default function Page() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isCE, evidenceMode, ceLocked, pressMode, isEnding, gameOver, danger]);
 
-  // timer -> timeout penalty
+  // timeout penalty
   useEffect(() => {
     if (!isCE) return;
     if (evidenceMode || ceLocked || pressMode || isEnding || gameOver) return;
     if (timeLeft > 0) return;
 
-    // timeout: HP-1, combo reset, next statement
     const timeoutPenalty = () => {
       doOverlay('시간 초과! 압박에 밀렸다…', 1000);
       doShake(420);
       doFlash(140);
       sfx('fail');
+      pulse(1);
+
       setCombo(0);
       setMult(1.0);
       setHp((h) => Math.max(0, h - 1));
-      pulse(1);
 
       const len = currentLine.statements?.length || 0;
       if (len > 0) {
@@ -1332,15 +1133,14 @@ export default function Page() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeLeft]);
 
-  // CE statement change -> reset timer with speed curve
+  // CE statement change -> reset timer
   useEffect(() => {
     if (!isCE) return;
-    // combo가 높을수록 기본 시간 약간 짧아져서 템포↑ (대신 정답 시 보너스로 상쇄)
     const c = comboRef.current || 0;
     const m = multRef.current || 1.0;
     const base = BASE_TIME;
-    const shrink = clamp(c / 18, 0, 1) * 1.6; // 최대 1.6s 감소
-    const add = clamp((m - 1) / 1.2, 0, 1) * 0.6; // 배율이 높으면 약간 보상
+    const shrink = clamp(c / 18, 0, 1) * 1.6;
+    const add = clamp((m - 1) / 1.2, 0, 1) * 0.6;
     const tm = clamp(base - shrink + add, 4.6, 8.0);
     setTimeMax(tm);
     setTimeLeft(tm);
@@ -1475,7 +1275,7 @@ export default function Page() {
     const tl = timeLeftRef.current || 0;
     const tm = timeMaxRef.current || BASE_TIME;
     const tp = tm > 0 ? clamp(tl / tm, 0, 1) : 0;
-    const nearMiss = tp < 0.18; // 거의 끝에 맞춤
+    const nearMiss = tp < 0.18;
     const perfect = tp > 0.72;
 
     doEffect('OBJECTION!', 1100);
@@ -1484,11 +1284,9 @@ export default function Page() {
     sfx('objection');
     pulse(1.2);
 
-    // combo/mult
     setCombo((c) => c + 1);
-    setMult((m) => clamp(m + (perfect ? 0.14 : nearMiss ? 0.18 : 0.10), 1.0, 2.25));
+    setMult((m) => clamp(m + (perfect ? 0.14 : nearMiss ? 0.18 : 0.1), 1.0, 2.25));
 
-    // time bonus
     const bonus = (perfect ? 1.2 : nearMiss ? 1.55 : 0.95) + clamp(comboRef.current / 20, 0, 1) * 0.5;
     setTimeLeft(clamp((timeMaxRef.current || BASE_TIME) * bonus, 2.2, 10.0));
 
@@ -1508,11 +1306,8 @@ export default function Page() {
       pulse(0.6);
       return;
     }
-    if (stmt.weakness && stmt.contradiction === key) {
-      applyCorrect();
-    } else {
-      applyPenalty(stmt.failMsg || '그 증거는 맞지 않습니다!');
-    }
+    if (stmt.weakness && stmt.contradiction === key) applyCorrect();
+    else applyPenalty(stmt.failMsg || '그 증거는 맞지 않습니다!');
   };
 
   const turnCounter = useMemo(() => {
@@ -1552,7 +1347,7 @@ export default function Page() {
           <p className="text-lg md:text-xl text-gray-300 mb-10 max-w-xl mx-auto leading-relaxed" style={{ fontFamily: 'Inter, sans-serif' }}>
             “확정”은 무너지고, 시간축은 잠겼다.
             <br />
-            그리고 압박 속에서도, 네가 먼저 모순을 꿰뚫었다.
+            압박 속에서도, 네가 먼저 모순을 꿰뚫었다.
           </p>
           <button
             onClick={reset}
@@ -1604,29 +1399,14 @@ export default function Page() {
   const speedLayerIntensity = clamp(speed * (isCE ? 1 : 0.4), 0, 1);
 
   return (
-    <div
-      className={`h-screen w-full relative overflow-hidden select-none transition-all duration-700 ${bgClass} ${
-        shake ? 'animate-shake' : ''
-      }`}
-    >
+    <div className={`h-screen w-full relative overflow-hidden select-none transition-all duration-700 ${bgClass} ${shake ? 'animate-shake' : ''}`}>
       <style jsx global>{globalCss}</style>
 
-      {/* Speed FX */}
       <SpeedLines intensity={speedLayerIntensity} pulse={speedPulse} danger={danger} />
 
-      {/* Depth overlays */}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/82 via-transparent to-transparent pointer-events-none z-[4]" />
-      <div
-        className="absolute inset-0 pointer-events-none z-[4]"
-        style={{
-          background:
-            danger > 0.6
-              ? `radial-gradient(circle at 50% 40%, rgba(0,0,0,0) 0%, rgba(0,0,0,${0.35 + danger * 0.35}) 70%)`
-              : `radial-gradient(circle at 50% 40%, rgba(0,0,0,0) 0%, rgba(0,0,0,${0.25 + speed * 0.22}) 72%)`,
-        }}
-      />
+      <div className="absolute inset-0 bg-gradient-to-t from-black/82 via-transparent to-transparent pointer-events-none z-[2]" />
 
-      <TopPills
+      <TopHUD
         hp={hp}
         hpMax={hpMax}
         evCount={invItems.length}
@@ -1684,8 +1464,8 @@ export default function Page() {
         />
       )}
 
-      {/* mobile mini HUD */}
-      <div className="absolute bottom-44 left-1/2 -translate-x-1/2 z-[35] md:hidden pointer-events-none">
+      {/* Mobile mini HUD (정렬) */}
+      <div className="absolute left-1/2 -translate-x-1/2 z-[35] md:hidden pointer-events-none" style={{ bottom: 'calc(160px + var(--safe-bot) + 12px)' }}>
         <div className={`px-4 py-2 rounded-full backdrop-blur-xl border ${danger > 0.6 ? 'bg-red-950/55 border-red-400/20' : 'bg-black/45 border-white/10'}`}>
           <div className="flex items-center gap-2 text-xs font-black tabular-nums text-white">
             <Zap className="w-4 h-4 text-amber-300" />
@@ -1699,21 +1479,126 @@ export default function Page() {
 }
 
 /* =========================
-   7) global CSS
+   8) global CSS
 ========================= */
 const globalCss = `
 @import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;600;700;900&family=Inter:wght@400;500;600;700;900&display=swap');
 
-:root { color-scheme: dark; }
-* { -webkit-tap-highlight-color: transparent; }
+:root{
+  color-scheme: dark;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bot: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --hud-h: 64px;
+  --hud-gap: 12px;
+}
+*{ -webkit-tap-highlight-color: transparent; }
 html, body { height: 100%; }
 body { margin: 0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; overflow: hidden; }
-
 .tabular-nums { font-variant-numeric: tabular-nums; }
 
+/* press feedback */
 .tap-scale { transform: translateZ(0); }
 .tap-scale:active { transform: scale(0.96); }
 
+/* HUD layout */
+.hud-root{
+  position: absolute;
+  top: calc(var(--safe-top) + 12px);
+  left: calc(var(--safe-left) + 12px);
+  right: calc(var(--safe-right) + 12px);
+  z-index: 50;
+  pointer-events: none;
+}
+.hud-row{
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: var(--hud-gap);
+}
+.hud-left, .hud-center, .hud-right{
+  display: flex;
+  align-items: center;
+  gap: var(--hud-gap);
+}
+.hud-left{ justify-content: flex-start; }
+.hud-center{ justify-content: center; }
+.hud-right{ justify-content: flex-end; pointer-events: auto; }
+
+.hud-pill{
+  pointer-events: auto;
+}
+.hud-pill-inner{
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: var(--hud-h);
+  padding: 0 16px;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.40);
+  border: 1px solid rgba(255,255,255,0.10);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.hud-icon{
+  width: var(--hud-h);
+  height: var(--hud-h);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.40);
+  border: 1px solid rgba(255,255,255,0.10);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.hud-icon:hover{ border-color: rgba(255,255,255,0.20); }
+
+.hud-action{
+  height: var(--hud-h);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.40);
+  border: 1px solid rgba(255,255,255,0.10);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.hud-action:hover{ border-color: rgba(255,255,255,0.20); }
+
+/* CrossExam pill: always below HUD */
+.ce-pill{
+  position: absolute;
+  top: calc(var(--safe-top) + 12px + var(--hud-h) + 14px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  animation: slideUp 260ms ease-out both;
+  pointer-events: none;
+}
+
+/* Dialogue */
+.dialogue-wrap{
+  position: absolute;
+  left: 0; right: 0;
+  bottom: calc(var(--safe-bot) + 0px);
+  padding: 18px 18px calc(18px + var(--safe-bot));
+  z-index: 30;
+  cursor: pointer;
+}
+.dialogue-actions{
+  position: absolute;
+  top: -78px;
+  right: 0;
+  display: flex;
+  gap: 12px;
+}
+
+/* Animations */
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
@@ -1743,4 +1628,12 @@ body { margin: 0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto
   100% { transform: scale(1.0); opacity: 0.6; }
 }
 .pulse-soft { animation: pulseSoft 980ms ease-in-out infinite; }
+
+/* Responsive tune */
+@media (max-width: 420px){
+  :root{ --hud-h: 56px; --hud-gap: 10px; }
+  .hud-pill-inner{ padding: 0 12px; }
+  .hud-action{ padding: 0 12px; }
+  .dialogue-actions{ top: -72px; }
+}
 `;
