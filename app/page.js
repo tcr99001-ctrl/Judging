@@ -1,5 +1,5 @@
 'use client';
-
+const ScaleIcon = Scale;
 import React, { useEffect, useMemo, useRef, useState, useReducer } from 'react';
 import {
   Scale,
