@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import {
   Scale,
   AlertCircle,
@@ -10,372 +10,508 @@ import {
   Volume2,
   VolumeX,
   RotateCcw,
-  Gavel,
-  Zap,
-  Timer,
+  HardDrive,
+  FolderOpen,
+  Trash2,
+  ShieldAlert,
 } from 'lucide-react';
 
+/* =========================================================
+   app/page.js — SINGLE FILE (RUNNABLE)
+   - JSON DSL(GAME_DB) 기반 VN + 재판 엔진
+   - talk / scene / anim / trial(=cross_exam)
+   - Press → evolveOnPress (증언 갱신)
+   - Evidence Present (약점 문장에 제시)
+   - Evidence Examine (hotspots)
+   - Evidence Combine (req 2개 → result)
+   - Save/Load 3 slots (localStorage)
+   - UI: safe-area, 가림/끊김 최소화
+========================================================= */
+
 /* =========================
-   0) utils
+   0) Global CSS
+========================= */
+const GLOBAL_CSS = `
+@import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap');
+:root{color-scheme:dark}
+html,body{height:100%}
+*{-webkit-tap-highlight-color:transparent}
+.safe-top{padding-top:env(safe-area-inset-top)}
+.safe-bottom{padding-bottom:env(safe-area-inset-bottom)}
+.no-scrollbar::-webkit-scrollbar{width:0;height:0}
+@keyframes shake{0%,100%{transform:translate(0)}25%{transform:translate(-6px,3px)}75%{transform:translate(6px,-3px)}}
+.animate-shake{animation:shake .22s ease-in-out 3}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.animate-fade-in{animation:fadeIn .25s ease-out}
+@keyframes slideUp{from{transform:translateY(18px);opacity:0}to{transform:translateY(0);opacity:1}}
+.animate-slide-up{animation:slideUp .28s cubic-bezier(.16,1,.3,1)}
+`;
+
+/* =========================
+   1) Utils
 ========================= */
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const uid = (p = 'id') => `${p}_${Math.random().toString(36).slice(2, 8)}_${Date.now().toString(36)}`;
-const safeGet = (obj, path, fallback) => {
-  try {
-    const ps = path.split('.');
-    let cur = obj;
-    for (const p of ps) {
-      if (cur == null) return fallback;
-      cur = cur[p];
-    }
-    return cur == null ? fallback : cur;
-  } catch {
-    return fallback;
-  }
-};
-function useLatestRef(value) {
-  const r = useRef(value);
-  useEffect(() => {
-    r.current = value;
-  }, [value]);
-  return r;
+const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
+const uid = (p = 'id') => `${p}_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`;
+
+function ensureSentence(text) {
+  const s = String(text ?? '').trim();
+  if (!s) return s;
+  const last = s[s.length - 1];
+  const has = last === '.' || last === '!' || last === '?' || last === '…';
+  return has ? s : s + '.';
+}
+function deepClone(obj) {
+  return JSON.parse(JSON.stringify(obj));
 }
 
 /* =========================
-   1) WebAudio (simple + speed mod)
+   2) LocalStorage Save
 ========================= */
-function useAudioEngine() {
-  const ctxRef = useRef(null);
-  const masterRef = useRef(null);
-  const bgmNodesRef = useRef({ o: null, g: null, lfo: null, lfoG: null, cfg: null, baseFreq: 220 });
-  const [muted, setMuted] = useState(false);
+const SAVE_NS = 'ACEVN_GAME_DB_SAVE';
+const saveKey = (slot) => `${SAVE_NS}::slot::${slot}`;
 
-  const ensure = () => {
-    if (typeof window === 'undefined') return null;
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    if (!AudioCtx) return null;
-    if (!ctxRef.current) {
-      const ctx = new AudioCtx();
-      const master = ctx.createGain();
-      master.gain.value = 0.9;
-      master.connect(ctx.destination);
-      ctxRef.current = ctx;
-      masterRef.current = master;
-    }
-    return ctxRef.current;
-  };
-
-  const setMasterMuted = (m) => {
-    setMuted(m);
-    const ctx = ensure();
-    if (!ctx || !masterRef.current) return;
-    masterRef.current.gain.value = m ? 0 : 0.9;
-  };
-
-  const stopBgm = () => {
-    const n = bgmNodesRef.current;
-    try {
-      n.o?.stop();
-    } catch {}
-    try {
-      n.lfo?.stop();
-    } catch {}
-    try {
-      n.o?.disconnect();
-      n.g?.disconnect();
-      n.lfo?.disconnect();
-      n.lfoG?.disconnect();
-    } catch {}
-    bgmNodesRef.current = { o: null, g: null, lfo: null, lfoG: null, cfg: null, baseFreq: 220 };
-  };
-
-  const playBgm = (cfg) => {
-    const ctx = ensure();
-    if (!ctx || !masterRef.current) return;
-    if (!cfg) {
-      stopBgm();
-      return;
-    }
-    const prev = bgmNodesRef.current.cfg;
-    const same =
-      prev &&
-      prev.type === cfg.type &&
-      prev.freq === cfg.freq &&
-      prev.rate === cfg.rate &&
-      prev.depth === cfg.depth &&
-      prev.volume === cfg.volume;
-    if (same) return;
-
-    stopBgm();
-
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
-    o.type = cfg.type || 'sine';
-    o.frequency.value = cfg.freq || 220;
-    g.gain.value = cfg.volume ?? 0.02;
-
-    const lfo = ctx.createOscillator();
-    const lfoG = ctx.createGain();
-    lfo.type = 'sine';
-    lfo.frequency.value = cfg.rate || 0.2;
-    lfoG.gain.value = cfg.depth ?? 6;
-
-    lfo.connect(lfoG);
-    lfoG.connect(o.frequency);
-
-    o.connect(g);
-    g.connect(masterRef.current);
-
-    o.start();
-    lfo.start();
-
-    bgmNodesRef.current = { o, g, lfo, lfoG, cfg: { ...cfg }, baseFreq: cfg.freq || 220 };
-  };
-
-  // speedFactor: 0..1
-  const setBgmSpeed = (speedFactor) => {
-    const n = bgmNodesRef.current;
-    const ctx = ensure();
-    if (!ctx || !n?.o) return;
-    const sf = clamp(speedFactor ?? 0, 0, 1);
-    const target = n.baseFreq * (1 + 0.18 * sf);
-    try {
-      n.o.frequency.setTargetAtTime(target, ctx.currentTime, 0.08);
-      if (n.g) {
-        const vol = (n.cfg?.volume ?? 0.02) * (1 + 0.12 * sf);
-        n.g.gain.setTargetAtTime(vol, ctx.currentTime, 0.12);
-      }
-    } catch {}
-  };
-
-  const sfxBeep = (freq = 880, dur = 0.06, vol = 0.06, type = 'square') => {
-    const ctx = ensure();
-    if (!ctx || !masterRef.current) return;
-    if (muted) return;
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
-    o.type = type;
-    o.frequency.value = freq;
-    g.gain.value = vol;
-    o.connect(g);
-    g.connect(masterRef.current);
-    o.start();
-    setTimeout(() => {
-      try {
-        o.stop();
-      } catch {}
-      try {
-        o.disconnect();
-        g.disconnect();
-      } catch {}
-    }, dur * 1000);
-  };
-
-  return { muted, setMasterMuted, playBgm, stopBgm, sfxBeep, setBgmSpeed };
+function safeJSONParse(s, fb = null) {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return fb;
+  }
+}
+function lsSave(slot, data) {
+  if (typeof window === 'undefined') return { ok: false, reason: 'no_window' };
+  try {
+    window.localStorage.setItem(saveKey(slot), JSON.stringify(data));
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, reason: String(e) };
+  }
+}
+function lsLoad(slot) {
+  if (typeof window === 'undefined') return { ok: false, reason: 'no_window' };
+  const raw = window.localStorage.getItem(saveKey(slot));
+  if (!raw) return { ok: false, reason: 'not_found' };
+  const obj = safeJSONParse(raw, null);
+  if (!obj) return { ok: false, reason: 'parse_failed' };
+  return { ok: true, data: obj };
+}
+function lsDelete(slot) {
+  if (typeof window === 'undefined') return { ok: false, reason: 'no_window' };
+  try {
+    window.localStorage.removeItem(saveKey(slot));
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, reason: String(e) };
+  }
 }
 
 /* =========================
-   2) GAME DB
+   3) Asset Audio (optional)
+========================= */
+function makeAudio(url, { loop = false, volume = 1 } = {}) {
+  const a = new Audio(url);
+  a.loop = !!loop;
+  a.preload = 'auto';
+  a.volume = clamp(volume, 0, 1);
+  return a;
+}
+async function fadeTo(audio, targetVol, ms) {
+  if (!audio) return;
+  const start = audio.volume;
+  const end = clamp(targetVol, 0, 1);
+  const dur = Math.max(0, ms | 0);
+  if (dur === 0) {
+    audio.volume = end;
+    return;
+  }
+  const t0 = performance.now();
+  return new Promise((resolve) => {
+    const tick = () => {
+      const t = performance.now();
+      const p = clamp((t - t0) / dur, 0, 1);
+      audio.volume = start + (end - start) * p;
+      if (p >= 1) resolve();
+      else requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+}
+function useAudioBus() {
+  const unlockedRef = useRef(false);
+  const mutedRef = useRef(false);
+
+  const bgmCurRef = useRef({ key: null, audio: null, cache: new Map() });
+  const sfxPoolRef = useRef(new Map());
+
+  const unlock = async () => {
+    if (unlockedRef.current) return true;
+    unlockedRef.current = true;
+    try {
+      const t = new Audio();
+      t.muted = true;
+      await t.play().catch(() => {});
+      t.pause();
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const setMuted = async (m) => {
+    mutedRef.current = !!m;
+    const cur = bgmCurRef.current.audio;
+    if (cur) cur.volume = mutedRef.current ? 0 : cur.volume;
+  };
+
+  const playBgm = async (key, url, { fadeMs = 520, vol = 0.75 } = {}) => {
+    if (!url) return;
+    const cur = bgmCurRef.current;
+    if (cur.key === key) return;
+
+    let next = cur.cache.get(key);
+    if (!next) {
+      next = makeAudio(url, { loop: true, volume: 0 });
+      cur.cache.set(key, next);
+    }
+
+    try {
+      await next.play();
+    } catch {}
+
+    const prev = cur.audio;
+    cur.audio = next;
+    cur.key = key;
+
+    const target = mutedRef.current ? 0 : vol;
+    await fadeTo(next, target, fadeMs);
+
+    if (prev && prev !== next) {
+      await fadeTo(prev, 0, fadeMs);
+      try {
+        prev.pause();
+      } catch {}
+      try {
+        prev.currentTime = 0;
+      } catch {}
+    }
+  };
+
+  const playSfx = async (key, url, { vol = 0.95 } = {}) => {
+    if (!url) return false;
+    if (mutedRef.current) return true;
+
+    const pools = sfxPoolRef.current;
+    let pool = pools.get(key);
+    if (!pool) {
+      pool = Array.from({ length: 6 }, () => makeAudio(url, { loop: false, volume: vol }));
+      pools.set(key, pool);
+    }
+    let picked = pool[0];
+    for (const a of pool) {
+      if (a.paused || a.ended) {
+        picked = a;
+        break;
+      }
+    }
+    try {
+      picked.volume = vol;
+      try {
+        picked.currentTime = 0;
+      } catch {}
+      await picked.play();
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  return { unlock, setMuted, playBgm, playSfx };
+}
+
+/* =========================
+   4) GAME_DB (Episode 1 + Trial 1 script)
 ========================= */
 const GAME_DB = {
   meta: {
-    title: 'INSANE SPEED 법정 진실공방',
-    subtitle: '타이머·콤보·속도FX로 압박하는 심문',
+    title: '에피소드 1: 단선된 진실 (The Severed Truth)',
+    description:
+      '90년대 장기 미제 유괴·협박 사건의 목소리 트릭과 알리바이 조작 요소를, 스마트 시티 인프라(도어락 로그·스마트워치·CCTV 프레임 드롭·AI 음성 분류·전력 데이터)로 재해석한 가상의 사건. 흑막은 직접 언급되지 않고 입막음 방식과 조작 흔적만 남긴다.',
   },
   backgrounds: {
     court: 'bg-gradient-to-b from-slate-950 via-slate-900 to-black',
     hall: 'bg-gradient-to-b from-slate-900 to-slate-800',
-    press: 'bg-gradient-to-br from-indigo-950 to-slate-900',
+    server: 'bg-gradient-to-br from-slate-900 via-indigo-950 to-black',
     tense: 'bg-gradient-to-br from-red-950 to-slate-900',
     ending: 'bg-gradient-to-br from-slate-950 via-slate-900 to-black',
-    gameover: 'bg-gradient-to-br from-black via-red-950 to-slate-950',
   },
   bgm: {
-    calm: { type: 'sine', freq: 180, rate: 0.14, depth: 4, volume: 0.02 },
     trial: { type: 'square', freq: 210, rate: 0.33, depth: 9, volume: 0.02 },
     tense: { type: 'triangle', freq: 240, rate: 0.22, depth: 7, volume: 0.025 },
-    climax: { type: 'sawtooth', freq: 260, rate: 0.38, depth: 10, volume: 0.018 },
     victory: { type: 'sine', freq: 420, rate: 0.11, depth: 3, volume: 0.025 },
   },
-  sfx: {
-    tap: { freq: 520, dur: 0.04, vol: 0.035, type: 'square' },
-    success: { freq: 980, dur: 0.06, vol: 0.06, type: 'square' },
-    fail: { freq: 210, dur: 0.08, vol: 0.06, type: 'sawtooth' },
-    objection: { freq: 1080, dur: 0.07, vol: 0.08, type: 'square' },
-    flash: { freq: 760, dur: 0.03, vol: 0.03, type: 'triangle' },
-    tick: { freq: 1280, dur: 0.02, vol: 0.02, type: 'sine' },
-  },
   characters: {
-    judge: {
-      name: '재판장',
-      color: '#6B7280',
-      avatar:
-        "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%23374151'/%3E%3Ctext x='50' y='60' font-size='40' text-anchor='middle' fill='white'%3E⚖%3C/text%3E%3C/svg%3E",
-    },
-    prosecutor: {
-      name: '최검사',
-      color: '#DC2626',
-      avatar:
-        "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%23DC2626'/%3E%3Ctext x='50' y='60' font-size='34' text-anchor='middle' fill='white'%3E검%3C/text%3E%3C/svg%3E",
-    },
-    player: {
-      name: '강변호',
-      color: '#2563EB',
-      avatar:
-        "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%232563EB'/%3E%3Ctext x='50' y='60' font-size='34' text-anchor='middle' fill='white'%3E변%3C/text%3E%3C/svg%3E",
-    },
-    narrator: { name: '내레이션', color: '#9CA3AF', avatar: null },
-    defendant: {
-      name: '피고인(익명)',
-      color: '#8B5CF6',
-      avatar:
-        "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%238B5CF6'/%3E%3Ctext x='50' y='60' font-size='26' text-anchor='middle' fill='white'%3E피고%3C/text%3E%3C/svg%3E",
-    },
+    judge: { name: '마판사', color: '#6B7280', desc: '절차주의. 말이 짧다. 말버릇: 핵심만.' },
+    player: { name: '진무연', color: '#2563EB', desc: '직관과 논리를 선으로 연결하는 변호사. 말버릇: 선이 연결됐어.' },
+    prosecutor: { name: '류시온', color: '#DC2626', desc: '데이터 맹신 검사. 말버릇: 오차율 0%입니다.' },
     witness1: {
-      name: '경비원 박○○',
+      name: '박경비',
       color: '#10B981',
       avatars: {
         normal:
-          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%2310B981'/%3E%3Ctext x='50' y='60' font-size='22' text-anchor='middle' fill='white'%3E경비%3C/text%3E%3C/svg%3E",
+          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%2310B981'/%3E%3Ctext x='50' y='62' font-size='28' text-anchor='middle' fill='white'%3E경비%3C/text%3E%3C/svg%3E",
         sweat:
-          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%23FBBF24'/%3E%3Ctext x='50' y='60' font-size='34' text-anchor='middle' fill='white'%3E😰%3C/text%3E%3C/svg%3E",
-        angry:
-          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%23EF4444'/%3E%3Ctext x='50' y='60' font-size='34' text-anchor='middle' fill='white'%3E😡%3C/text%3E%3C/svg%3E",
+          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23F59E0B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😰%3C/text%3E%3C/svg%3E",
+        crazy:
+          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23991B1B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E🤯%3C/text%3E%3C/svg%3E",
       },
+      desc: '사람 좋은 척하지만 빚에 쪼들린 경비원. 몰리면 아니유가 튀어나온다.',
     },
     witness2: {
-      name: '배달기사 김○○',
+      name: '최실장',
+      color: '#8B5CF6',
+      avatars: {
+        normal:
+          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%238B5CF6'/%3E%3Ctext x='50' y='62' font-size='28' text-anchor='middle' fill='white'%3EIT%3C/text%3E%3C/svg%3E",
+        sweat:
+          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23F59E0B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😰%3C/text%3E%3C/svg%3E",
+        crazy:
+          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23991B1B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😈%3C/text%3E%3C/svg%3E",
+      },
+      desc: 'IT 총괄. 말버릇: 로그가 말해요. 몰리면 웃음으로 넘기다 갑자기 차가워진다.',
+    },
+    witness3: {
+      name: '윤기사',
       color: '#06B6D4',
       avatars: {
         normal:
-          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%2306B6D4'/%3E%3Ctext x='50' y='60' font-size='22' text-anchor='middle' fill='white'%3E배달%3C/text%3E%3C/svg%3E",
+          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%2306B6D4'/%3E%3Ctext x='50' y='62' font-size='28' text-anchor='middle' fill='white'%3E기사%3C/text%3E%3C/svg%3E",
         sweat:
-          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%23FBBF24'/%3E%3Ctext x='50' y='60' font-size='34' text-anchor='middle' fill='white'%3E😰%3C/text%3E%3C/svg%3E",
-        shock:
-          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%23F59E0B'/%3E%3Ctext x='50' y='60' font-size='34' text-anchor='middle' fill='white'%3E😱%3C/text%3E%3C/svg%3E",
+          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23F59E0B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😰%3C/text%3E%3C/svg%3E",
+        crazy:
+          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23991B1B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😡%3C/text%3E%3C/svg%3E",
       },
-    },
-    witness3: {
-      name: '검시관 서○○',
-      color: '#A855F7',
-      avatars: {
-        normal:
-          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%23A855F7'/%3E%3Ctext x='50' y='60' font-size='22' text-anchor='middle' fill='white'%3E검시%3C/text%3E%3C/svg%3E",
-        sweat:
-          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%23FBBF24'/%3E%3Ctext x='50' y='60' font-size='34' text-anchor='middle' fill='white'%3E😰%3C/text%3E%3C/svg%3E",
-      },
-    },
-    witness4: {
-      name: 'IT관리자 정○○',
-      color: '#F97316',
-      avatars: {
-        normal:
-          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%23F97316'/%3E%3Ctext x='50' y='60' font-size='22' text-anchor='middle' fill='white'%3EIT%3C/text%3E%3C/svg%3E",
-        sweat:
-          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%23FBBF24'/%3E%3Ctext x='50' y='60' font-size='34' text-anchor='middle' fill='white'%3E😰%3C/text%3E%3C/svg%3E",
-        angry:
-          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%23EF4444'/%3E%3Ctext x='50' y='60' font-size='34' text-anchor='middle' fill='white'%3E😡%3C/text%3E%3C/svg%3E",
-      },
+      desc: '시설 관리 기사. 말버릇: 전기는 거짓말 안 해요. 몰리면 냉소가 튀어나온다.',
     },
   },
   evidence: {
-    autopsy: { name: '검시 예비 소견서', icon: '🧾', desc: '사망 추정시각 21:10±20분, 둔기성 손상.' },
-    revised_autopsy: { name: '검시 보완 소견서', icon: '🧾', desc: '사망 추정시각 20:35±15분으로 수정. 위 내용물 분석 반영.' },
-    cctv_lobby: { name: '로비 CCTV 캡처', icon: '📹', desc: '20:58 로비에 피고인으로 보이는 인물. 화질 불량.' },
-    cctv_blindspot: { name: 'CCTV 사각지대 도면', icon: '🗺️', desc: '엘리베이터 앞 3m 구간은 반사광으로 얼굴 식별 불가.' },
-    elevator_log: { name: '엘리베이터 운행 로그', icon: '🛗', desc: '20:41 14층→1층, 20:49 1층→14층. 카드 태그 없음(비상모드 기록).' },
-    door_access: { name: '출입문 카드기록', icon: '🪪', desc: '피고인 카드: 20:28 14층 출입, 21:05 재출입.' },
-    phone_ping: { name: '휴대폰 기지국 기록', icon: '📶', desc: '20:33~20:52 인근 기지국 체류. 실내/실외 구분 불가.' },
-    delivery_receipt: { name: '배달 영수증', icon: '🧾', desc: '20:46 “14층 1402호 문앞” 전달. 서명 없음.' },
-    parking_ticket: { name: '주차정산 기록', icon: '🅿️', desc: '20:37 정산 완료. 차량 출차 20:39.' },
-    printer_log: { name: '프린터 출력 로그', icon: '🖨️', desc: '20:34 “14F-공용프린터” 출력 2장. 사용자 인증 토큰 “A-Temp”.' },
-    temp_token: { name: '임시 인증 토큰', icon: '🔑', desc: 'IT가 발급한 1회용 토큰. 발급자/수령자 기록이 불완전.' },
-    tool_mark: { name: '둔기(조각상) 감정', icon: '🗿', desc: '사무실 장식 조각상. 손잡이 부분 마모, 지문 불명확.' },
+    autopsy: { name: '검시 소견서', icon: '🧾', desc: '피해자 윤비서의 사인은 둔기성 두부 손상. 사망 추정 시각 21:00.' },
+    smartwatch_data: { name: '피해자 스마트워치', icon: '⌚', desc: '심박이 20:45:12 급상승 후 20:45:19 급정지. 이후 움직임 없음.' },
+    server_log: { name: '서버실 도어락 로그', icon: '🚪', desc: "20:55~21:05 동안 '잠김 유지'. '열림' 이벤트 없음." },
+    hall_cctv: { name: '복도 CCTV 캡처', icon: '📹', desc: '21:00 전후 복도에 누군가 스쳐 지나가지만 프레임 드롭으로 얼굴이 깨진다.' },
+    power_spike: { name: '랙 전력 급등 기록', icon: '🔌', desc: '20:45:12 서버랙 전력 급등. 0.2초 과전류 보호가 작동했다.' },
+    voice_print: { name: '서버실 인터폰 음성 로그', icon: '🎙️', desc: "20:59 '문 열어' 음성. 발화자 분류가 윤비서로 찍혀 있다." },
+    server_blade: {
+      name: '피 묻은 서버 블레이드',
+      icon: '🔪',
+      desc: '현장에 떨어진 금속 부품. 손잡이에서 박경비 지문 검출.',
+      examine: {
+        bg: 'bg-slate-800 text-gray-200',
+        content:
+          "[압수품: 서버 블레이드 제1호]\n무게 3.5kg 금속 부품.\n손잡이 혈흔 다량.\n끝부분 변색이 이상하다.",
+        hotspots: [
+          {
+            id: 'burn_mark',
+            x: 78,
+            y: 38,
+            width: 16,
+            height: 22,
+            resultEvidenceKey: 'electric_burn',
+            successMsg: '끝부분이 국부 용융됐다. 혈흔이 아니라 고전압 스파크 흔적이다.',
+          },
+        ],
+      },
+    },
+    electric_burn: { name: '블레이드의 탄 자국', icon: '⚡', desc: '고전압 스파크에 의한 용융 자국. 금속 표면이 녹아내렸다.' },
+    real_time_of_death: {
+      name: '진짜 사망 시각 (20:45)',
+      icon: '⏱️',
+      desc: '스마트워치 심정지와 전력 급등이 20:45에 일치한다. 21:00 타격은 사후일 가능성이 크다.',
+    },
+    staged_accident: {
+      name: '감전사 위장 정황',
+      icon: '💀',
+      desc: '피해자는 20:45 감전으로 즉사했고, 누군가 21:00 전후 두부 손상을 추가해 살인으로 위장했다.',
+    },
+    evolved_voice_log: { name: '조작된 분류 정황', icon: '🧩', desc: "프레임 드롭과 분류 모델 편향으로 '윤비서 음성' 태깅이 틀릴 수 있다." },
   },
+  combinations: [
+    {
+      req: ['autopsy', 'smartwatch_data'],
+      result: 'real_time_of_death',
+      successMsg: '심정지(20:45)가 진짜 사망 시각이다. 21:00의 타격은 사후일 가능성이 생겼다.',
+    },
+    {
+      req: ['real_time_of_death', 'electric_burn'],
+      result: 'staged_accident',
+      successMsg: '탄 자국과 20:45 심정지. 선이 연결됐다. 사인은 타살이 아니라 감전사다.',
+    },
+    {
+      req: ['voice_print', 'hall_cctv'],
+      result: 'evolved_voice_log',
+      successMsg: '프레임 드롭과 음성 분류. 보이는 것과 태깅된 것은 다를 수 있다.',
+    },
+  ],
   cases: [
     {
-      id: 'case_001',
-      title: '밤의 14층',
-      tagline: '익명 피고인 · 로비 CCTV · 뒤집히는 사망시각',
-      coverBgKey: 'court',
-      defaultBgmKey: 'trial',
-      hpMax: 7,
-      initialEvidence: ['autopsy', 'cctv_lobby', 'door_access', 'phone_ping', 'tool_mark'],
+      title: '제1화: 단선된 진실',
+      apMax: 5,
+      initialEvidence: ['autopsy', 'smartwatch_data', 'server_log', 'server_blade', 'voice_print', 'power_spike', 'hall_cctv'],
       script: [
         { type: 'scene', bgKey: 'court', bgmKey: 'trial' },
-        { type: 'talk', charKey: 'narrator', text: '심야 오피스 건물 14층에서 살인 사건이 발생했다.' },
-        { type: 'talk', charKey: 'narrator', text: '피해자는 내부 감사팀 직원. 피고인은 “익명 처리된 내부자”.' },
-        { type: 'talk', charKey: 'judge', text: '본 법정은 사실관계 확인을 위해 다수 증인을 채택합니다.' },
-        { type: 'talk', charKey: 'prosecutor', text: '피고인은 20:58 로비 CCTV에 등장했고, 21:10 전후 피해자를 살해했습니다.' },
-        { type: 'talk', charKey: 'player', text: '증거가 “보이는 것”과 “사실”은 다릅니다. 그 차이를 입증하겠습니다.' },
-        { type: 'anim', name: 'flash', sfxKey: 'flash' },
-        { type: 'talk', charKey: 'judge', text: '좋습니다. 첫 번째 증인을 부르겠습니다.' },
+        { type: 'talk', charKey: 'judge', text: '개정합니다. 핵심만.' },
+        { type: 'talk', charKey: 'prosecutor', text: '오차율 0%입니다. 21:00. 밀실. 둔기 타격.' },
+        { type: 'talk', charKey: 'player', text: '선이 엉켰네요. 풀어보죠.' },
 
         {
           type: 'trial',
-          title: '경비원 박○○의 증언 ① (로비 목격)',
+          title: '박경비의 목격 증언',
           witnessCharKey: 'witness1',
           bgKey: 'hall',
           statements: [
-            { text: '저는 1층 로비에서 20:55부터 근무했습니다.' },
-            { text: '20:58경, 피고인으로 보이는 사람이 로비에 들어왔습니다.' },
-            { text: '그 사람은 모자를 쓰고 있었지만 체형이 피고인과 같았습니다.' },
-            { text: '그 뒤 바로 엘리베이터 쪽으로 걸어갔습니다.' },
-            { text: '엘리베이터 앞에서 잠시 멈추더니 14층 버튼을 눌렀습니다.' },
-            { text: '그 장면은 CCTV에도 고스란히 남아 있습니다.' },
-            { text: '따라서 피고인이 14층으로 올라간 건 확실합니다.' },
-            { text: '그리고 21:05쯤 피고인이 다시 14층으로 들어가는 것도 봤습니다.' },
-            { text: '피고인 카드 기록도 그걸 뒷받침합니다.' },
+            { id: 'w1_01', text: '21:00 정각, 누가 서버실 쪽에서 튀어나왔슈.' },
             {
-              text: '결론적으로 피고인은 20:58~21:10 사이, 피해자와 같은 층에 있었습니다.',
-              weak: true,
-              contradictionEvidenceKey: 'cctv_blindspot',
-              failMsg: '“확실하다”는 주장에 빈틈이 있다. CCTV의 구조를 뒤집을 증거가 필요하다.',
-              pressQ: '당신은 얼굴을 “확실히” 봤습니까?',
+              id: 'w1_02',
+              text: '손에 피 묻은 블레이드를 들고 있었구먼.',
+              pressQ: '피를 봤다?',
               press: [
-                { charKey: 'witness1', text: '얼굴은… 완벽하진 않지만, 체형과 걸음걸이가…', face: 'sweat' },
-                { charKey: 'player', text: '(식별 근거가 약하다. “확실”을 무너뜨려야 한다.)' },
+                { charKey: 'player', text: '거리랑 조명. 정확히.' },
+                { charKey: 'witness1', face: 'sweat', text: '복도등이 깜빡였슈. 그래도 빨갛게… 보였슈.' },
+              ],
+            },
+            {
+              id: 'w1_03',
+              text: '문이 열려 있었슈. 그래서 나왔다고 확신했슈.',
+              pressQ: '문이 열렸다고요?',
+              press: [
+                { charKey: 'player', text: '도어락 로그는 봤어요?' },
+                { charKey: 'witness1', face: 'sweat', text: '그건… 나중에… 들었슈.' },
+              ],
+              evolveOnPress: {
+                newText: '문이 열렸다고 생각했슈. 나중에 로그가 잠겼다고 해서… 헷갈렸슈.',
+                weakness: true,
+                contradictionEvidenceKey: 'server_log',
+                failMsg: '도어락 로그에 열림 이벤트가 있나?',
+              },
+            },
+            {
+              id: 'w1_04',
+              text: '얼굴은 못 봤지만, 빨간 랜야드가 흔들렸슈.',
+              pressQ: '얼굴도 못 봤는데 확정?',
+              press: [
+                { charKey: 'player', text: '확정은 금지죠.' },
+                { charKey: 'witness1', face: 'sweat', text: "아니유. 그래서… '그럴 것 같다'였슈." },
               ],
             },
           ],
         },
 
-        { type: 'anim', name: 'objection', sfxKey: 'objection' },
-        { type: 'talk', charKey: 'player', text: '이의 있습니다!', size: 'text-3xl', color: 'text-blue-400' },
-        { type: 'talk', charKey: 'player', text: 'CCTV는 “고스란히” 남지 않습니다. 구조적으로 사각이 있습니다.' },
-        { type: 'talk', charKey: 'prosecutor', text: '사각이 있든 없든, 로비에 있었던 사실은 변하지 않습니다.' },
-        { type: 'talk', charKey: 'judge', text: '변호인은 “확실”이라는 단어를 쟁점으로 삼는군요. 다음 증인으로 넘어갑니다.' },
+        { type: 'anim', name: 'objection' },
+        { type: 'talk', charKey: 'player', text: '이의 있습니다. 20:55부터 21:05까지 문은 열린 적이 없습니다.' },
+        { type: 'talk', charKey: 'prosecutor', text: '시간 착각이죠. 20:55 이전에 들어가 잠복.' },
+        { type: 'talk', charKey: 'player', text: '그럼 사망 시각부터 바꿔야겠네요.' },
 
         {
           type: 'trial',
-          title: '검시관 서○○의 증언 ② (사망시각)',
-          witnessCharKey: 'witness3',
+          title: '류시온의 팩트 선언',
+          witnessCharKey: 'prosecutor',
           bgKey: 'tense',
           statements: [
-            { text: '피해자의 직접 사인은 둔기성 두부 손상입니다.' },
-            { text: '사망 추정시각은 21:10을 중심으로 ±20분입니다.' },
-            { text: '따라서 20:50 이전 사망은 가능성이 낮습니다.' },
             {
-              text: '즉, 사망시각을 흔들 증거는 없습니다.',
-              weak: true,
-              contradictionEvidenceKey: 'revised_autopsy',
-              failMsg: '사망시각은 “보완 소견서”가 핵심이다.',
-              pressQ: '당신은 “위 내용물 분석”을 했습니까?',
-              press: [
-                { charKey: 'witness3', text: '초기에는 제한적이었습니다. 보완 분석은…', face: 'sweat' },
-                { charKey: 'player', text: '(보완 분석이 있다. “초기 소견”을 절대시하면 진다.)' },
-              ],
+              id: 'p_01',
+              text: '사망 추정 시각은 21:00입니다. 흔들리지 않습니다.',
+              weakness: true,
+              contradictionEvidenceKey: 'real_time_of_death',
+              failMsg: '두 단서를 조합해 진짜 사망 시각을 만들어야 한다.',
             },
           ],
         },
 
-        { type: 'anim', name: 'objection', sfxKey: 'objection' },
-        { type: 'talk', charKey: 'player', text: '이의 있습니다! 보완 소견서가 있습니다!', size: 'text-3xl', color: 'text-red-500' },
-        { type: 'talk', charKey: 'judge', text: '시간축이 뒤집혔군요.' },
+        { type: 'anim', name: 'objection' },
+        { type: 'talk', charKey: 'player', text: '선이 연결됐어. 심정지는 20:45입니다.' },
+        { type: 'talk', charKey: 'prosecutor', text: '…뭐죠, 그건.' },
+        { type: 'talk', charKey: 'player', text: '21:00의 타격은 사후입니다.' },
+
+        { type: 'talk', charKey: 'prosecutor', text: '좋아. 그럼 20:45의 사람.' },
+        { type: 'talk', charKey: 'prosecutor', text: '박경비. 흉기 지문. 끝.' },
+
+        { type: 'talk', charKey: 'witness1', face: 'crazy', text: '아니유! 난 만졌을 뿐이유! 겁나서…!' },
+        { type: 'talk', charKey: 'judge', text: '다음 증인.' },
+
+        {
+          type: 'trial',
+          title: '최실장의 은폐',
+          witnessCharKey: 'witness2',
+          bgKey: 'tense',
+          statements: [
+            { id: 'w2_01', text: '로그가 말해요. 20:45. 박경비 동선. 끝.' },
+            {
+              id: 'w2_02',
+              text: '블레이드가 흉기입니다. 피가 증거예요.',
+              pressQ: '피가 곧 살인?',
+              press: [
+                { charKey: 'player', text: '끝부분 변색은 봤나요?' },
+                { charKey: 'witness2', face: 'sweat', text: '그건… 중요하지 않죠. 피가 더 중요하니까.' },
+              ],
+              evolveOnPress: {
+                newText: '피가 묻은 흉기면 끝이에요. 다른 해석은 변명입니다.',
+                weakness: true,
+                contradictionEvidenceKey: 'staged_accident',
+                failMsg: '탄 자국 + 진짜 사망 시각을 조합해 위장을 만들라.',
+              },
+            },
+          ],
+        },
+
+        { type: 'anim', name: 'objection' },
+        { type: 'talk', charKey: 'player', text: '이 사건의 본질은 살인이 아닙니다. 감전사입니다.' },
+        { type: 'talk', charKey: 'prosecutor', text: '감전…?' },
+        { type: 'talk', charKey: 'player', text: '20:45 전력 급등. 탄 자국. 심정지. 선이 맞아요.' },
+        { type: 'talk', charKey: 'judge', text: '21:00의 타격은?' },
+        { type: 'talk', charKey: 'player', text: '사후 위장입니다.' },
+
+        { type: 'talk', charKey: 'witness2', face: 'crazy', text: '…재밌네요.' },
+        { type: 'talk', charKey: 'player', text: '뭐가요.' },
+        { type: 'talk', charKey: 'witness2', text: '알면… 불편해져요.' },
+
+        {
+          type: 'trial',
+          title: '음성 로그의 함정',
+          witnessCharKey: 'witness3',
+          bgKey: 'server',
+          statements: [
+            { id: 'w3_01', text: '전기는 거짓말 안 해요. 사람은 해요.' },
+            {
+              id: 'w3_02',
+              text: '20:59 인터폰. 윤비서 음성으로 분류됐죠.',
+              pressQ: '윤비서는 20:45에 죽었다.',
+              press: [
+                { charKey: 'player', text: '그럼 태깅이 틀렸을 수도.' },
+                { charKey: 'witness3', face: 'sweat', text: '분류는… 틀릴 수도 있어요. 프레임이 깨지면.' },
+              ],
+              evolveOnPress: {
+                newText: '프레임 드롭이면 태깅이 틀릴 수 있어요. 목소리도 과거 샘플에 끌려가요.',
+                weakness: true,
+                contradictionEvidenceKey: 'evolved_voice_log',
+                failMsg: 'CCTV 프레임 드롭과 음성 분류를 엮어 조작 가능성을 만들라.',
+              },
+            },
+          ],
+        },
+
+        { type: 'talk', charKey: 'player', text: '즉, 윤비서 음성은 확정 증거가 아닙니다.' },
+        { type: 'talk', charKey: 'prosecutor', text: '오차율 0%…라고 했던 내가, 틀릴 수도 있나.' },
+
+        { type: 'talk', charKey: 'judge', text: '결론.' },
+        { type: 'talk', charKey: 'player', text: '20:45 감전사. 21:00 위장. 로그는 조작 가능. 유죄는 못 갑니다.' },
+        { type: 'talk', charKey: 'judge', text: '무죄.' },
+
+        { type: 'talk', charKey: 'witness2', face: 'sweat', text: '…증언, 취소합니다.' },
+        { type: 'talk', charKey: 'judge', text: '정숙!' },
 
         { type: 'scene', bgKey: 'ending', bgmKey: 'victory' },
-        { type: 'anim', name: 'victory', sfxKey: 'success' },
-        { type: 'talk', charKey: 'judge', text: '피고인에게 무죄를 선고합니다.', size: 'text-3xl' },
+        { type: 'talk', charKey: 'narrator', text: '법정 밖, 최실장은 발신자 없는 무음 전화를 받았다.' },
+        { type: 'talk', charKey: 'narrator', text: '그는 통화를 하지 않았다. 고개만 끄덕였다.' },
+        { type: 'talk', charKey: 'player', text: '선이… 끊겼어.' },
         { type: 'end', text: 'THE END' },
       ],
     },
@@ -383,1257 +519,1343 @@ const GAME_DB = {
 };
 
 /* =========================
-   3) compiler (DSL -> runtime lines)
+   5) Compile DSL → runtime
 ========================= */
-function compileCase(c) {
+function compileGame(db) {
+  const baseCase = db.cases?.[0];
+  const script = baseCase?.script || [];
   const lines = [];
-  const push = (l) => {
-    const line = { ...l };
-    if (!line.id && (line.type === 'scene' || line.type === 'talk' || line.type === 'choice' || line.type === 'trial')) {
-      line.id = uid(line.type);
-    }
-    lines.push(line);
-  };
 
-  for (const raw of c.script) {
+  for (const raw of script) {
     if (!raw || !raw.type) continue;
 
-    if (raw.type === 'trial') {
-      push({
-        ...raw,
-        type: 'cross_exam',
-        title: raw.title,
-        isFinal: !!raw.isFinal,
-        witnessCharKey: raw.witnessCharKey || 'witness1',
-        bgKey: raw.bgKey,
-        statements: (raw.statements || []).map((s) => ({
-          text: s.text ?? '',
-          weakness: !!s.weak,
-          contradiction: s.contradictionEvidenceKey,
-          failMsg: s.failMsg,
-          press: s.pressQ,
-          pressResponse: (s.press || []).map((p) => ({
-            type: 'talk',
-            charKey: p.charKey,
-            text: p.text ?? '',
-            face: p.face ?? 'normal',
-          })),
-        })),
+    if (raw.type === 'talk') {
+      lines.push({
+        type: 'talk',
+        charKey: raw.charKey || 'narrator',
+        text: ensureSentence(raw.text),
+        face: raw.face || 'normal',
+        bgKey: raw.bgKey || null,
       });
       continue;
     }
 
-    push(raw);
+    if (raw.type === 'scene') {
+      lines.push({ type: 'scene', bgKey: raw.bgKey || 'court', bgmKey: raw.bgmKey || null });
+      continue;
+    }
+
+    if (raw.type === 'anim') {
+      lines.push({ type: 'anim', name: raw.name || 'flash' });
+      continue;
+    }
+
+    if (raw.type === 'end') {
+      lines.push({ type: 'end', text: String(raw.text || 'THE END') });
+      continue;
+    }
+
+    if (raw.type === 'trial') {
+      const statements = (raw.statements || []).map((s) => ({
+        id: s.id || uid('stmt'),
+        text: ensureSentence(s.text),
+        pressQ: s.pressQ ? ensureSentence(s.pressQ) : null,
+        press: Array.isArray(s.press)
+          ? s.press.map((p) => ({
+              charKey: p.charKey || 'narrator',
+              face: p.face || 'normal',
+              text: ensureSentence(p.text),
+            }))
+          : [],
+        evolveOnPress: s.evolveOnPress
+          ? {
+              newText: ensureSentence(s.evolveOnPress.newText),
+              weakness: !!s.evolveOnPress.weakness,
+              contradictionEvidenceKey: s.evolveOnPress.contradictionEvidenceKey || null,
+              failMsg: s.evolveOnPress.failMsg ? ensureSentence(s.evolveOnPress.failMsg) : null,
+            }
+          : null,
+        weakness: !!s.weakness,
+        contradictionEvidenceKey: s.contradictionEvidenceKey || null,
+        failMsg: s.failMsg ? ensureSentence(s.failMsg) : null,
+      }));
+
+      lines.push({
+        type: 'cross_exam',
+        title: raw.title || '심문',
+        bgKey: raw.bgKey || 'court',
+        witnessCharKey: raw.witnessCharKey || 'witness1',
+        statements,
+      });
+      continue;
+    }
+
+    // fallback
+    lines.push(raw);
   }
 
-  return { lines };
+  const initialEvidence = baseCase?.initialEvidence || [];
+  const apMax = baseCase?.apMax ?? 5;
+
+  return {
+    meta: db.meta,
+    backgrounds: db.backgrounds,
+    characters: db.characters,
+    evidence: db.evidence,
+    combinations: db.combinations || [],
+    lines,
+    initialEvidence,
+    apMax,
+    bgm: db.bgm,
+  };
 }
 
 /* =========================
-   4) SPEED FX: Canvas speed lines
+   6) State + Reducer
 ========================= */
-function SpeedLines({ intensity = 0, pulse = 0, danger = 0 }) {
-  const canvasRef = useRef(null);
-  const rafRef = useRef(0);
-  const tRef = useRef(0);
-  const lastRef = useRef(0);
-  const dprRef = useRef(1);
+const AT = {
+  RESET: 'RESET',
+  NEXT: 'NEXT',
+  PRESS: 'PRESS',
+  PRESS_NEXT: 'PRESS_NEXT',
+  PRESENT: 'PRESENT',
+  OPEN_EVIDENCE: 'OPEN_EVIDENCE',
+  CLOSE_EVIDENCE: 'CLOSE_EVIDENCE',
+  OPEN_COMBINE: 'OPEN_COMBINE',
+  CLOSE_COMBINE: 'CLOSE_COMBINE',
+  OPEN_EXAMINE: 'OPEN_EXAMINE',
+  CLOSE_EXAMINE: 'CLOSE_EXAMINE',
+  SELECT_COMBINE_A: 'SELECT_COMBINE_A',
+  SELECT_COMBINE_B: 'SELECT_COMBINE_B',
+  APPLY_COMBINE: 'APPLY_COMBINE',
+  HYDRATE: 'HYDRATE',
+};
 
-  useEffect(() => {
-    const c = canvasRef.current;
-    if (!c) return;
+function initialState(game) {
+  return {
+    idx: 0,
+    bgKey: game.lines?.[0]?.bgKey || 'court',
+    hpMax: game.apMax,
+    hp: game.apMax,
+    // inventory
+    inv: Array.from(new Set(game.initialEvidence || [])),
+    // trial
+    ceIndex: 0,
+    pressMode: false,
+    pressIndex: 0,
+    // ui
+    evidenceOpen: false,
+    combineOpen: false,
+    examineOpen: false,
+    examineKey: null,
+    combineA: null,
+    combineB: null,
+    // evolve memory: stmtId -> evolved {text, weakness,...}
+    evolved: {},
+    // end flags
+    ending: false,
+    gameOver: false,
+  };
+}
 
-    const resize = () => {
-      const dpr = Math.max(1, Math.min(2.25, window.devicePixelRatio || 1));
-      dprRef.current = dpr;
-      const rect = c.getBoundingClientRect();
-      c.width = Math.floor(rect.width * dpr);
-      c.height = Math.floor(rect.height * dpr);
-    };
+function reducer(game, state, action) {
+  const lines = game.lines || [];
+  const line = lines[state.idx];
 
-    resize();
-    window.addEventListener('resize', resize);
-    return () => window.removeEventListener('resize', resize);
-  }, []);
+  const getStatement = () => {
+    if (!line || line.type !== 'cross_exam') return null;
+    const s = line.statements?.[state.ceIndex] || null;
+    if (!s) return null;
+    // if evolved exists, merge
+    const ev = state.evolved?.[s.id];
+    if (ev) {
+      return { ...s, ...ev, isEvolved: true };
+    }
+    return s;
+  };
 
-  useEffect(() => {
-    const c = canvasRef.current;
-    if (!c) return;
-    const ctx = c.getContext('2d', { alpha: true });
-    if (!ctx) return;
+  switch (action.type) {
+    case AT.RESET:
+      return initialState(game);
 
-    const draw = (ts) => {
-      rafRef.current = requestAnimationFrame(draw);
-      const last = lastRef.current || ts;
-      const dt = Math.min(0.033, Math.max(0.0, (ts - last) / 1000));
-      lastRef.current = ts;
+    case AT.HYDRATE:
+      return action.state && isObj(action.state) ? action.state : state;
 
-      tRef.current += dt * (0.8 + intensity * 2.2);
-      const t = tRef.current;
+    case AT.OPEN_EVIDENCE:
+      return { ...state, evidenceOpen: true };
+    case AT.CLOSE_EVIDENCE:
+      return { ...state, evidenceOpen: false };
 
-      const w = c.width;
-      const h = c.height;
-      ctx.clearRect(0, 0, w, h);
+    case AT.OPEN_COMBINE:
+      return { ...state, combineOpen: true };
+    case AT.CLOSE_COMBINE:
+      return { ...state, combineOpen: false, combineA: null, combineB: null };
 
-      const cx = w * 0.5;
-      const cy = h * 0.42;
-      const n = Math.floor(38 + intensity * 200);
+    case AT.OPEN_EXAMINE:
+      return { ...state, examineOpen: true, examineKey: action.key || null };
+    case AT.CLOSE_EXAMINE:
+      return { ...state, examineOpen: false, examineKey: null };
 
-      // glow
-      const glow = 0.06 + intensity * 0.22 + pulse * 0.16;
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = glow;
-      ctx.fillStyle = danger > 0.6 ? 'rgba(255,80,80,1)' : 'rgba(90,160,255,1)';
-      ctx.beginPath();
-      ctx.ellipse(cx, cy, w * 0.22, h * 0.14, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
+    case AT.SELECT_COMBINE_A:
+      return { ...state, combineA: action.key || null };
+    case AT.SELECT_COMBINE_B:
+      return { ...state, combineB: action.key || null };
 
-      // lines
-      ctx.save();
-      ctx.translate(cx, cy);
-      ctx.globalCompositeOperation = 'lighter';
+    case AT.APPLY_COMBINE: {
+      const a = state.combineA;
+      const b = state.combineB;
+      if (!a || !b) return state;
+      const req = [a, b].sort().join('::');
 
-      const baseA = 0.05 + intensity * 0.20 + pulse * 0.16;
-      ctx.globalAlpha = clamp(baseA, 0, 0.5);
+      const hit = (game.combinations || []).find((c) => {
+        const rr = (c.req || []).slice().sort().join('::');
+        return rr === req;
+      });
 
-      const minDim = Math.min(w, h);
-      for (let i = 0; i < n; i++) {
-        const a = ((i / n) * Math.PI * 2 + t * 0.9) % (Math.PI * 2);
-        const r1 = (0.05 + Math.random() * 0.12) * minDim;
-        const r2 = (0.22 + Math.random() * 0.58 + intensity * 0.22) * minDim;
-        const x1 = Math.cos(a) * r1;
-        const y1 = Math.sin(a) * r1;
-        const x2 = Math.cos(a) * r2;
-        const y2 = Math.sin(a) * r2;
+      if (!hit) return { ...state, combineOpen: false, combineA: null, combineB: null };
 
-        const lw = (1 + intensity * 2.2) * dprRef.current * (0.55 + Math.random() * 1.15);
-        ctx.lineWidth = lw;
-        ctx.strokeStyle =
-          danger > 0.6
-            ? `rgba(255, ${Math.floor(120 + Math.random() * 80)}, ${Math.floor(120 + Math.random() * 80)}, 1)`
-            : `rgba(${Math.floor(120 + Math.random() * 70)}, ${Math.floor(200 + Math.random() * 55)}, 255, 1)`;
+      const resultKey = hit.result;
+      const inv = new Set(state.inv);
+      inv.add(resultKey);
 
-        ctx.beginPath();
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-        ctx.stroke();
+      return {
+        ...state,
+        inv: Array.from(inv),
+        combineOpen: false,
+        combineA: null,
+        combineB: null,
+        // show overlay via ui event outside reducer
+      };
+    }
+
+    case AT.PRESS: {
+      if (!line || line.type !== 'cross_exam') return state;
+      const s = getStatement();
+      if (!s) return state;
+      if (!s.press || !s.press.length) return state;
+      return { ...state, pressMode: true, pressIndex: 0 };
+    }
+
+    case AT.PRESS_NEXT: {
+      if (!state.pressMode) return state;
+      const s = getStatement();
+      const n = s?.press?.length || 0;
+      if (n <= 0) return { ...state, pressMode: false, pressIndex: 0 };
+
+      // if there is evolveOnPress and press is fully consumed, evolve then exit press
+      const last = state.pressIndex >= n - 1;
+      if (!last) return { ...state, pressIndex: state.pressIndex + 1 };
+
+      // consume last press then evolve (if any)
+      const evo = s?.evolveOnPress;
+      if (evo) {
+        const nextEvolved = { ...(state.evolved || {}) };
+        nextEvolved[s.id] = {
+          text: evo.newText,
+          weakness: !!evo.weakness,
+          contradictionEvidenceKey: evo.contradictionEvidenceKey,
+          failMsg: evo.failMsg,
+        };
+        return { ...state, evolved: nextEvolved, pressMode: false, pressIndex: 0 };
       }
 
-      ctx.restore();
+      return { ...state, pressMode: false, pressIndex: 0 };
+    }
 
-      // vignette
-      ctx.save();
-      const v = 0.55 + intensity * 0.35;
-      const grad = ctx.createRadialGradient(cx, cy, minDim * 0.15, cx, cy, minDim * v);
-      grad.addColorStop(0, 'rgba(0,0,0,0)');
-      grad.addColorStop(1, danger > 0.6 ? 'rgba(0,0,0,0.78)' : 'rgba(0,0,0,0.7)');
-      ctx.fillStyle = grad;
-      ctx.globalAlpha = 0.78;
-      ctx.fillRect(0, 0, w, h);
-      ctx.restore();
-    };
+    case AT.PRESENT: {
+      if (!line || line.type !== 'cross_exam') return state;
+      const s = getStatement();
+      if (!s) return state;
 
-    rafRef.current = requestAnimationFrame(draw);
-    return () => {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = 0;
-    };
-  }, [intensity, pulse, danger]);
+      // require weakness to be true to allow solve
+      const isWeak = !!s.weakness;
+      const correctKey = s.contradictionEvidenceKey;
+      const presented = action.key;
 
-  return <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none z-[3]" />;
+      if (isWeak && correctKey && presented === correctKey) {
+        // solved this trial segment: advance to next line
+        const nextIdx = clamp(state.idx + 1, 0, lines.length - 1);
+        const nextLine = lines[nextIdx];
+        return {
+          ...state,
+          idx: nextIdx,
+          bgKey: nextLine?.bgKey || state.bgKey,
+          ceIndex: 0,
+          pressMode: false,
+          pressIndex: 0,
+          evidenceOpen: false,
+        };
+      }
+
+      // wrong: hp down
+      const hp = Math.max(0, state.hp - 1);
+      return { ...state, hp, gameOver: hp <= 0 };
+    }
+
+    case AT.NEXT: {
+      if (state.ending || state.gameOver) return state;
+
+      // if press mode, next means press-next
+      if (state.pressMode) return reducer(game, state, { type: AT.PRESS_NEXT });
+
+      if (!line) return state;
+
+      if (line.type === 'scene') {
+        // auto-advance to next line; bgKey already set by scene
+        const nextIdx = clamp(state.idx + 1, 0, lines.length - 1);
+        const nextLine = lines[nextIdx];
+        return { ...state, idx: nextIdx, bgKey: nextLine?.bgKey || line.bgKey || state.bgKey };
+      }
+
+      if (line.type === 'anim') {
+        const nextIdx = clamp(state.idx + 1, 0, lines.length - 1);
+        const nextLine = lines[nextIdx];
+        return { ...state, idx: nextIdx, bgKey: nextLine?.bgKey || state.bgKey };
+      }
+
+      if (line.type === 'end') {
+        return { ...state, ending: true };
+      }
+
+      if (line.type === 'cross_exam') {
+        const total = line.statements?.length || 0;
+        if (total <= 0) {
+          const nextIdx = clamp(state.idx + 1, 0, lines.length - 1);
+          const nextLine = lines[nextIdx];
+          return { ...state, idx: nextIdx, bgKey: nextLine?.bgKey || state.bgKey, ceIndex: 0 };
+        }
+        const last = state.ceIndex >= total - 1;
+        if (last) {
+          // block if unresolved weaknesses exist
+          const weakIdx = (line.statements || []).map((st, i) => ({ st, i })).filter(({ st }) => {
+            const ev = state.evolved?.[st.id];
+            const merged = ev ? { ...st, ...ev } : st;
+            return !!merged.weakness;
+          });
+          if (weakIdx.length > 0) {
+            // keep at first weak
+            return { ...state, ceIndex: weakIdx[0].i };
+          }
+          // no weak: advance
+          const nextIdx = clamp(state.idx + 1, 0, lines.length - 1);
+          const nextLine = lines[nextIdx];
+          return { ...state, idx: nextIdx, bgKey: nextLine?.bgKey || state.bgKey, ceIndex: 0 };
+        }
+        return { ...state, ceIndex: state.ceIndex + 1 };
+      }
+
+      // talk
+      const nextIdx = clamp(state.idx + 1, 0, lines.length - 1);
+      const nextLine = lines[nextIdx];
+      return { ...state, idx: nextIdx, bgKey: nextLine?.bgKey || state.bgKey };
+    }
+
+    default:
+      return state;
+  }
 }
 
 /* =========================
-   5) HUD (정렬된 상단)
+   7) Runtime selectors
 ========================= */
-function HudPill({ children, className = '' }) {
-  return (
-    <div className={`hud-pill ${className}`}>
-      <div className="hud-pill-inner">{children}</div>
-    </div>
-  );
+function pickAvatar(char, face) {
+  const a = char?.avatars || {};
+  return a?.[face] || a?.normal || null;
 }
 
-function TopHUD({
-  hp,
-  hpMax,
-  evCount,
-  evMax,
-  onOpenEvidence,
-  muted,
-  onToggleMute,
-  turn,
-  combo,
-  mult,
-  timeLeft,
-  timeMax,
-  speed,
-  danger,
-}) {
-  const tP = timeMax > 0 ? clamp(timeLeft / timeMax, 0, 1) : 1;
-  const barFrom = danger > 0.6 ? 'from-red-400' : 'from-blue-400';
-  const barTo = danger > 0.6 ? 'to-amber-300' : 'to-cyan-300';
+function deriveView(game, state) {
+  const lines = game.lines || [];
+  const line = lines[state.idx];
+  const chars = game.characters || {};
+  const bgKey = state.bgKey || line?.bgKey || 'court';
+  const bgClass = game.backgrounds?.[bgKey] || 'bg-gradient-to-b from-slate-950 via-slate-900 to-black';
 
-  return (
-    <div className="hud-root">
-      <div className="hud-row">
-        <div className="hud-left">
-          <HudPill>
-            <div className="flex items-center gap-3">
-              <Scale className="w-5 h-5 text-blue-400" strokeWidth={2} />
-              <div className="flex gap-1.5">
-                {[...Array(hpMax)].map((_, i) => (
-                  <div
-                    key={i}
-                    className={`w-2 h-2 rounded-full transition-all duration-300 ${
-                      i < hp ? 'bg-blue-400 shadow-lg shadow-blue-400/50' : 'bg-gray-700'
-                    }`}
-                  />
-                ))}
-              </div>
-            </div>
-          </HudPill>
+  const isCE = line?.type === 'cross_exam';
+  const stmt0 = isCE ? (line.statements?.[state.ceIndex] || null) : null;
+  const ev = stmt0 ? state.evolved?.[stmt0.id] : null;
+  const stmt = stmt0 ? (ev ? { ...stmt0, ...ev } : stmt0) : null;
 
-          <HudPill className="hidden md:block">
-            <div className="flex items-center gap-2">
-              <Gavel className="w-5 h-5 text-gray-200" />
-              <span className="text-sm font-semibold text-white" style={{ fontFamily: 'Inter, sans-serif' }}>
-                TURN {turn}
-              </span>
-            </div>
-          </HudPill>
-        </div>
+  const pressItem = state.pressMode && stmt?.press?.length ? stmt.press[state.pressIndex] : null;
 
-        <div className="hud-center">
-          <HudPill className="w-[18.5rem] md:w-[22rem]">
-            <div className="flex items-center gap-3 w-full">
-              <Timer className={`w-5 h-5 ${danger > 0.6 ? 'text-red-300' : 'text-cyan-200'}`} />
-              <div className="flex-1 h-2 rounded-full bg-white/10 overflow-hidden">
-                <div
-                  className={`h-full rounded-full bg-gradient-to-r ${barFrom} ${barTo} shadow-md`}
-                  style={{ width: `${Math.floor(tP * 100)}%`, transition: 'width 120ms linear' }}
-                />
-              </div>
-              <span className={`text-xs font-black tabular-nums ${danger > 0.6 ? 'text-red-200' : 'text-cyan-100'}`}>
-                {timeLeft.toFixed(1)}s
-              </span>
-            </div>
-          </HudPill>
+  const speakerKey = (() => {
+    if (pressItem?.charKey) return pressItem.charKey;
+    if (isCE) return line.witnessCharKey || 'witness1';
+    if (line?.type === 'talk') return line.charKey || 'narrator';
+    return 'narrator';
+  })();
 
-          <HudPill className="hidden md:block">
-            <div className="flex items-center gap-2">
-              <Zap className="w-5 h-5 text-amber-300" />
-              <span className="text-sm font-black text-white tabular-nums" style={{ fontFamily: 'Inter, sans-serif' }}>
-                x{mult.toFixed(2)}
-              </span>
-              <span className="text-xs font-semibold text-amber-200/90 tabular-nums ml-2">COMBO {combo}</span>
-              <span className="text-[10px] text-white/70 tabular-nums ml-2">{Math.floor(speed * 100)}%</span>
-            </div>
-          </HudPill>
-        </div>
+  const speaker = chars[speakerKey] || chars.narrator;
+  const face = pressItem?.face || (line?.type === 'talk' ? line.face : 'normal');
 
-        <div className="hud-right">
-          <button onClick={onToggleMute} className="hud-icon tap-scale" aria-label="mute">
-            {muted ? <VolumeX className="w-5 h-5 text-gray-200" /> : <Volume2 className="w-5 h-5 text-gray-200" />}
-          </button>
+  const text = (() => {
+    if (state.pressMode && pressItem?.text) return pressItem.text;
+    if (isCE) return stmt?.text || '';
+    if (line?.type === 'talk') return line.text || '';
+    if (line?.type === 'end') return line.text || 'THE END';
+    return '';
+  })();
 
-          <button onClick={onOpenEvidence} className="hud-action tap-scale" aria-label="evidence">
-            <FileText className="w-5 h-5 text-amber-400" strokeWidth={2} />
-            <span className="text-sm font-semibold text-white tabular-nums" style={{ fontFamily: 'Inter, sans-serif' }}>
-              {evCount} / {evMax}
-            </span>
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+  const hint = (() => {
+    if (!isCE) return '';
+    if (stmt?.weakness) return stmt?.failMsg || '약한 문장이다. 증거를 제시해라.';
+    return '';
+  })();
+
+  return {
+    line,
+    bgKey,
+    bgClass,
+    isCE,
+    ceTitle: isCE ? line.title : '',
+    ceIndex: isCE ? state.ceIndex : 0,
+    ceTotal: isCE ? (line.statements?.length || 0) : 0,
+    witnessKey: isCE ? line.witnessCharKey : null,
+    stmt,
+    speakerKey,
+    speaker,
+    face,
+    avatar: pickAvatar(speaker, face),
+    text,
+    hint,
+  };
 }
 
 /* =========================
-   6) UI bits
+   8) UI Components
 ========================= */
-function EffectLayer({ effectText, flash, overlayMsg, speedPulse, danger }) {
-  return (
-    <>
-      {effectText && (
-        <div className="absolute inset-0 z-[100] flex items-center justify-center bg-gradient-to-br from-blue-600/20 to-red-600/20 backdrop-blur-sm">
-          <div className="relative">
-            <div className="absolute inset-0 bg-white/10 blur-3xl pulse-soft"></div>
-            <h1
-              className="relative text-7xl md:text-9xl font-black tracking-tighter text-white drop-shadow-2xl"
-              style={{
-                fontFamily: 'Crimson Pro, serif',
-                textShadow:
-                  danger > 0.6
-                    ? '0 0 40px rgba(239, 68, 68, 0.8), 0 0 80px rgba(239, 68, 68, 0.4)'
-                    : '0 0 40px rgba(59, 130, 246, 0.8), 0 0 80px rgba(59, 130, 246, 0.4)',
-                transform: `scale(${1 + speedPulse * 0.03})`,
-              }}
-            >
-              {effectText}
-            </h1>
-          </div>
-        </div>
-      )}
-
-      {overlayMsg && (
-        <div className="absolute inset-0 z-[95] flex items-start justify-center pt-[calc(var(--hud-h)+var(--safe-top)+12px)] pointer-events-none">
-          <div
-            className={`px-5 py-3 rounded-2xl backdrop-blur-xl text-white text-sm font-semibold animate-fade-in ${
-              danger > 0.6 ? 'bg-red-900/60 border border-red-400/20' : 'bg-black/70 border border-white/10'
-            }`}
-          >
-            {overlayMsg}
-          </div>
-        </div>
-      )}
-
-      {flash && <div className="absolute inset-0 z-[90] bg-white/20 pointer-events-none" />}
-
-      {speedPulse > 0.001 && (
-        <div
-          className="absolute inset-0 z-[4] pointer-events-none"
-          style={{
-            background:
-              danger > 0.6
-                ? `radial-gradient(circle at 50% 40%, rgba(255,120,120,${0.08 + speedPulse * 0.12}) 0%, rgba(0,0,0,0) 55%)`
-                : `radial-gradient(circle at 50% 40%, rgba(120,180,255,${0.08 + speedPulse * 0.12}) 0%, rgba(0,0,0,0) 55%)`,
-          }}
-        />
-      )}
-    </>
-  );
+function Pill({ children }) {
+  return <div className="px-4 py-2 rounded-full border border-white/10 bg-black/45 backdrop-blur-md">{children}</div>;
 }
 
-function CharacterAvatar({ char, face, speed }) {
-  if (!char) return null;
-  const src = char.avatars?.[face] || char.avatar || null;
-  const wobble = 1 + speed * 0.02;
+function ModalShell({ open, onClose, title, icon, children, footer }) {
+  if (!open) return null;
   return (
-    <div className="absolute bottom-[calc(160px+var(--safe-bot)+140px)] left-1/2 -translate-x-1/2 z-10 pointer-events-none">
-      <div className="relative animate-fade-in" style={{ transform: `scale(${wobble})` }}>
-        <div className="absolute inset-0 rounded-full blur-2xl opacity-30" style={{ backgroundColor: char.color }} />
-        {src ? (
-          <img src={src} alt={char.name} className="relative w-28 h-28 md:w-32 md:h-32 rounded-full border-2 border-white/20 shadow-2xl" />
-        ) : (
-          <div className="relative w-28 h-28 md:w-32 md:h-32 rounded-full border-2 border-white/20 shadow-2xl bg-white/5" />
-        )}
+    <div className="fixed inset-0 z-[999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="w-full max-w-4xl max-h-[85vh] rounded-3xl border border-white/10 bg-black/75 backdrop-blur-xl overflow-hidden flex flex-col">
+        <div className="px-6 py-5 border-b border-white/10 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-11 h-11 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center">{icon}</div>
+            <div className="min-w-0">
+              <div className="text-xl font-semibold text-white" style={{ fontFamily: 'Crimson Pro, serif' }}>
+                {title}
+              </div>
+            </div>
+          </div>
+          <button onClick={onClose} className="w-10 h-10 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 flex items-center justify-center">
+            ✕
+          </button>
+        </div>
+        <div className="p-6 overflow-auto no-scrollbar">{children}</div>
+        {footer ? <div className="px-6 py-4 border-t border-white/10">{footer}</div> : null}
       </div>
     </div>
   );
 }
 
-function CrossExamPill({ title, isFinal, cur, total, witnessName, combo, mult, danger }) {
-  return (
-    <div className="ce-pill">
-      <div
-        className={`px-6 py-3 rounded-full border backdrop-blur-md ${
-          isFinal ? 'bg-red-950/80 border-red-500/50 text-red-200' : 'bg-blue-950/80 border-blue-500/50 text-blue-200'
-        }`}
-      >
-        <div className="flex items-center gap-3">
-          <AlertCircle className="w-4 h-4" strokeWidth={2} />
-          <span className="text-sm font-semibold" style={{ fontFamily: 'Inter, sans-serif' }}>
-            {isFinal ? '최후의 증언' : title} · {cur}/{total} · {witnessName}
-          </span>
-          <span className={`ml-2 text-xs font-black tabular-nums ${danger > 0.6 ? 'text-red-100' : 'text-cyan-100'}`}>
-            x{mult.toFixed(2)}
-          </span>
-          <span className="text-xs font-semibold text-amber-200/90 tabular-nums">COMBO {combo}</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DialogueBox({
-  char,
-  text,
-  colorClass,
-  sizeClass,
-  onNext,
-  isCE,
-  pressMode,
-  onPress,
-  onOpenEvidence,
-  danger,
+function EvidenceModal({
+  open,
+  onClose,
+  inventory,
+  evidenceMap,
+  admittedSet,
+  onPresent,
+  onExamine,
+  onOpenCombine,
+  onOpenAdmission,
+  hint,
 }) {
   return (
-    <div onClick={onNext} className="dialogue-wrap">
-      <div className="max-w-5xl mx-auto">
-        {char && (
-          <div className="mb-3 ml-4">
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-t-xl bg-black/60 backdrop-blur-md border-t border-x border-white/10">
-              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: char.color }} />
-              <span className="text-sm font-semibold text-white" style={{ fontFamily: 'Inter, sans-serif' }}>
-                {char.name}
-              </span>
-            </div>
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      title="증거"
+      icon={<FileText className="w-5 h-5 text-amber-300" />}
+      footer={
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-xs text-gray-400" style={{ fontFamily: 'Inter, sans-serif' }}>
+            {hint || ''}
           </div>
-        )}
-
-        <div
-          className={`relative bg-black/80 backdrop-blur-xl border rounded-2xl p-7 md:p-8 min-h-[160px] cursor-pointer transition-all duration-300 group ${
-            danger > 0.6 ? 'border-red-400/30 hover:border-red-300/40' : 'border-white/10 hover:border-white/20'
-          }`}
-        >
-          <p
-            className={`text-xl leading-relaxed ${colorClass || 'text-white'} ${sizeClass || ''}`}
-            style={{ fontFamily: 'Inter, sans-serif', fontWeight: 500 }}
-          >
-            {text}
-          </p>
-
-          {isCE && !pressMode && (
-            <div className="dialogue-actions">
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onPress();
-                }}
-                className="tap-scale flex items-center gap-2 px-6 py-3 bg-blue-600/90 hover:bg-blue-500 text-white font-semibold rounded-xl backdrop-blur-sm transition-all duration-300 border border-blue-400/30"
-                style={{ fontFamily: 'Inter, sans-serif' }}
-              >
-                <Search className="w-5 h-5" strokeWidth={2} />
-                <span>추궁</span>
-              </button>
-
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onOpenEvidence();
-                }}
-                className="tap-scale flex items-center gap-2 px-6 py-3 bg-amber-600/90 hover:bg-amber-500 text-white font-semibold rounded-xl backdrop-blur-sm transition-all duration-300 border border-amber-400/30"
-                style={{ fontFamily: 'Inter, sans-serif' }}
-              >
-                <FileText className="w-5 h-5" strokeWidth={2} />
-                <span>증거 제시</span>
-              </button>
-            </div>
-          )}
-
-          <div className="absolute bottom-6 right-6 opacity-40 group-hover:opacity-100 transition-opacity pointer-events-none">
-            <ChevronRight className={`w-6 h-6 ${danger > 0.6 ? 'text-red-200' : 'text-white'} animate-pulse`} strokeWidth={2} />
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function EvidenceModal({ items, isTrial, hint, onClose, onPresent, onReset }) {
-  return (
-    <div className="absolute inset-0 bg-black/95 backdrop-blur-xl z-40 overflow-y-auto">
-      <div className="max-w-7xl mx-auto p-6 md:p-8">
-        <div className="flex items-center justify-between mb-8 md:mb-10 gap-4">
-          <div className="flex items-center gap-4 min-w-0">
-            <FileText className="w-8 h-8 text-amber-400 shrink-0" strokeWidth={2} />
-            <h2 className="text-3xl font-semibold text-white truncate" style={{ fontFamily: 'Crimson Pro, serif' }}>
-              증거 목록
-            </h2>
-          </div>
-
-          <div className="flex items-center gap-3 shrink-0">
-            <button
-              onClick={onReset}
-              className="tap-scale flex items-center gap-2 px-4 py-3 bg-white/5 hover:bg-white/10 text-white font-semibold rounded-xl border border-white/10 transition-all"
-              style={{ fontFamily: 'Inter, sans-serif' }}
-            >
-              <RotateCcw className="w-4 h-4" />
-              <span>리셋</span>
+          <div className="flex gap-2">
+            <button onClick={onOpenCombine} className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold" style={{ fontFamily: 'Inter, sans-serif' }}>
+              조합
             </button>
-            <button
-              onClick={onClose}
-              className="tap-scale px-6 py-3 bg-white/5 hover:bg-white/10 text-white font-semibold rounded-xl border border-white/10 transition-all"
-              style={{ fontFamily: 'Inter, sans-serif' }}
-            >
+            <button onClick={onClose} className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold" style={{ fontFamily: 'Inter, sans-serif' }}>
               닫기
             </button>
           </div>
         </div>
-
-        {hint && (
-          <div className="mb-6 px-5 py-4 rounded-2xl bg-amber-500/10 border border-amber-400/20 text-amber-200">
-            <div className="text-sm font-semibold" style={{ fontFamily: 'Inter, sans-serif' }}>
-              {hint}
-            </div>
-          </div>
-        )}
-
-        {items.length === 0 ? (
-          <div className="text-center text-gray-400 py-24 md:py-28">
-            <FileText className="w-16 h-16 mx-auto mb-4 opacity-20" strokeWidth={1} />
-            <p className="text-xl" style={{ fontFamily: 'Inter, sans-serif' }}>
-              수집한 증거가 없습니다
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {items.map((item) => (
-              <button
-                key={item.key}
-                onClick={() => (isTrial ? onPresent(item.key) : null)}
-                className="tap-scale p-6 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-amber-400/50 rounded-2xl transition-all duration-300 text-left group"
-              >
-                <div className="flex items-start gap-6">
-                  <div className="text-5xl flex-shrink-0 opacity-80 group-hover:opacity-100 transition-opacity">{item.icon}</div>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="text-xl font-semibold text-white mb-2 truncate" style={{ fontFamily: 'Inter, sans-serif' }}>
-                      {item.name}
-                    </h3>
-                    <p className="text-sm text-gray-400 leading-relaxed" style={{ fontFamily: 'Inter, sans-serif' }}>
-                      {item.desc}
-                    </p>
-                    <div className="mt-3 text-xs text-amber-400 font-semibold opacity-0 group-hover:opacity-100 transition-opacity">
-                      {isTrial ? '클릭하여 제시 →' : '지금은 확인만 가능 →'}
+      }
+    >
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {inventory.map((key) => {
+          const ev = evidenceMap[key];
+          if (!ev) return null;
+          const admitted = admittedSet.has(key);
+          return (
+            <div key={key} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <div className="flex items-start gap-4">
+                <div className="text-4xl">{ev.icon || '🗂️'}</div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className="text-base font-semibold text-white" style={{ fontFamily: 'Inter, sans-serif' }}>
+                      {ev.name}
                     </div>
+                    <span className={`text-xs px-2 py-1 rounded-full border ${admitted ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200' : 'border-white/10 bg-black/20 text-gray-200'}`}>
+                      {admitted ? '채택' : '미채택'}
+                    </span>
+                    <span className="text-xs font-mono px-2 py-1 rounded-full bg-black/30 border border-white/10 text-gray-300">
+                      {key}
+                    </span>
+                  </div>
+                  <div className="mt-2 text-sm text-gray-300 leading-relaxed" style={{ fontFamily: 'Inter, sans-serif' }}>
+                    {ev.desc}
                   </div>
                 </div>
-              </button>
-            ))}
-          </div>
-        )}
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-2 justify-end">
+                {ev.examine ? (
+                  <button onClick={() => onExamine(key)} className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 font-semibold" style={{ fontFamily: 'Inter, sans-serif' }}>
+                    조사
+                  </button>
+                ) : null}
+                <button onClick={() => onOpenAdmission(key)} className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 font-semibold" style={{ fontFamily: 'Inter, sans-serif' }}>
+                  채택
+                </button>
+                <button
+                  onClick={() => onPresent(key)}
+                  className="px-4 py-2 rounded-xl bg-amber-600/80 hover:bg-amber-500 border border-amber-400/30 font-semibold"
+                  style={{ fontFamily: 'Inter, sans-serif' }}
+                >
+                  제시
+                </button>
+              </div>
+            </div>
+          );
+        })}
       </div>
-    </div>
+    </ModalShell>
+  );
+}
+
+function CombineModal({ open, onClose, inventory, evidenceMap, a, b, onPickA, onPickB, onApply }) {
+  return (
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      title="단서 조합"
+      icon={<RotateCcw className="w-5 h-5 text-gray-200" />}
+      footer={
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-xs text-gray-400" style={{ fontFamily: 'Inter, sans-serif' }}>
+            두 개를 골라 조합하라.
+          </div>
+          <div className="flex gap-2">
+            <button onClick={onApply} className="px-4 py-2 rounded-xl bg-emerald-600/80 hover:bg-emerald-500 border border-emerald-400/30 font-semibold" style={{ fontFamily: 'Inter, sans-serif' }}>
+              조합
+            </button>
+            <button onClick={onClose} className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold" style={{ fontFamily: 'Inter, sans-serif' }}>
+              닫기
+            </button>
+          </div>
+        </div>
+      }
+    >
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-4 mb-4">
+        <div className="flex flex-wrap items-center gap-2 text-sm" style={{ fontFamily: 'Inter, sans-serif' }}>
+          <span className="text-gray-300">A:</span>
+          <span className="text-white font-semibold">{a ? evidenceMap[a]?.name || a : '선택'}</span>
+          <span className="text-gray-400">·</span>
+          <span className="text-gray-300">B:</span>
+          <span className="text-white font-semibold">{b ? evidenceMap[b]?.name || b : '선택'}</span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {inventory.map((key) => {
+          const ev = evidenceMap[key];
+          if (!ev) return null;
+          const selectedA = a === key;
+          const selectedB = b === key;
+          return (
+            <button
+              key={key}
+              onClick={() => {
+                if (!a || selectedA) onPickA(key);
+                else if (!b || selectedB) onPickB(key);
+                else onPickB(key);
+              }}
+              className={`p-4 rounded-2xl border text-left transition ${
+                selectedA || selectedB ? 'bg-amber-500/10 border-amber-400/30' : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
+              }`}
+            >
+              <div className="flex items-start gap-3">
+                <div className="text-3xl">{ev.icon || '🗂️'}</div>
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-white" style={{ fontFamily: 'Inter, sans-serif' }}>
+                    {ev.name}
+                  </div>
+                  <div className="text-xs text-gray-400 mt-1" style={{ fontFamily: 'Inter, sans-serif' }}>
+                    {ev.desc}
+                  </div>
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </ModalShell>
+  );
+}
+
+function ExamineModal({ open, onClose, evidenceKey, evidence, onFound }) {
+  if (!open || !evidenceKey || !evidence?.examine) return null;
+  const ex = evidence.examine;
+  const hotspots = ex.hotspots || [];
+  return (
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      title={`조사: ${evidence.name}`}
+      icon={<Search className="w-5 h-5 text-gray-200" />}
+      footer={
+        <div className="flex items-center justify-end">
+          <button onClick={onClose} className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold" style={{ fontFamily: 'Inter, sans-serif' }}>
+            닫기
+          </button>
+        </div>
+      }
+    >
+      <div className={`rounded-2xl border border-white/10 p-4 ${ex.bg || 'bg-white/5 text-gray-200'}`}>
+        <pre className="whitespace-pre-wrap text-sm leading-relaxed" style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' }}>
+          {ex.content}
+        </pre>
+
+        <div className="relative mt-4 w-full aspect-[16/9] rounded-2xl border border-white/10 bg-black/30 overflow-hidden">
+          {/* hotspots use percentage-like coordinates but are given as 0..100-ish */}
+          {hotspots.map((h) => (
+            <button
+              key={h.id}
+              onClick={() => onFound(h)}
+              className="absolute border border-amber-400/40 bg-amber-500/10 hover:bg-amber-500/20 rounded-xl transition"
+              style={{
+                left: `${h.x}%`,
+                top: `${h.y}%`,
+                width: `${h.width}%`,
+                height: `${h.height}%`,
+              }}
+              aria-label={h.id}
+            />
+          ))}
+          <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-black/40 to-transparent" />
+          <div className="absolute bottom-3 left-3 text-xs text-gray-300" style={{ fontFamily: 'Inter, sans-serif' }}>
+            핫스팟을 눌러 단서를 찾아라.
+          </div>
+        </div>
+      </div>
+    </ModalShell>
+  );
+}
+
+function AdmissionModal({ open, onClose, evidenceKey, evidence, admission, onOffer, onAdmit, onDeny }) {
+  if (!open || !evidenceKey) return null;
+  const admitted = admission.admitted.has(evidenceKey);
+  const denied = admission.denied.has(evidenceKey);
+  const pending = Array.from(admission.pending.values()).find((r) => r.evidenceKey === evidenceKey) || null;
+
+  return (
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      title="증거 채택"
+      icon={<ShieldAlert className="w-5 h-5 text-amber-300" />}
+      footer={
+        <div className="flex items-center justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold" style={{ fontFamily: 'Inter, sans-serif' }}>
+            닫기
+          </button>
+        </div>
+      }
+    >
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+        <div className="flex items-start gap-4">
+          <div className="text-4xl">{evidence?.icon || '🗂️'}</div>
+          <div className="min-w-0">
+            <div className="text-lg font-semibold text-white" style={{ fontFamily: 'Inter, sans-serif' }}>
+              {evidence?.name || evidenceKey}
+              <span className="ml-2 text-xs font-mono text-gray-400">{evidenceKey}</span>
+            </div>
+            <div className="mt-2 text-sm text-gray-300" style={{ fontFamily: 'Inter, sans-serif' }}>
+              {evidence?.desc || ''}
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2 text-xs" style={{ fontFamily: 'Inter, sans-serif' }}>
+              <span className={`px-2 py-1 rounded-full border ${admitted ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200' : denied ? 'border-rose-400/30 bg-rose-500/10 text-rose-200' : 'border-white/10 bg-black/20 text-gray-200'}`}>
+                {admitted ? '채택됨' : denied ? '기각됨' : pending ? '심리중' : '미신청'}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button onClick={onOffer} disabled={!!pending || admitted || denied} className="px-4 py-2 rounded-xl bg-blue-600/80 hover:bg-blue-500 border border-blue-400/30 font-semibold disabled:opacity-40">
+          신청
+        </button>
+        <button onClick={onAdmit} disabled={!pending} className="px-4 py-2 rounded-xl bg-emerald-600/80 hover:bg-emerald-500 border border-emerald-400/30 font-semibold disabled:opacity-40">
+          채택
+        </button>
+        <button onClick={onDeny} disabled={!pending} className="px-4 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-500 border border-rose-400/30 font-semibold disabled:opacity-40">
+          기각
+        </button>
+      </div>
+
+      {denied ? (
+        <div className="mt-4 text-sm text-rose-200 bg-rose-500/10 border border-rose-400/20 rounded-2xl p-4">
+          기각 사유: {admission.denied.get(evidenceKey)?.rationale || 'denied'}
+        </div>
+      ) : null}
+    </ModalShell>
+  );
+}
+
+function SaveLoadModal({ open, onClose, onSave, onLoad, onDelete }) {
+  const [toast, setToast] = useState(null);
+  const [busy, setBusy] = useState(null);
+
+  const run = async (slot, fn, okMsg, failMsg) => {
+    setBusy(slot);
+    try {
+      const r = await fn(slot);
+      setToast({ ok: r.ok, msg: r.msg || (r.ok ? okMsg : failMsg) });
+    } catch (e) {
+      setToast({ ok: false, msg: `${failMsg}: ${String(e)}` });
+    } finally {
+      setBusy(null);
+      setTimeout(() => setToast(null), 1400);
+    }
+  };
+
+  return (
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      title="세이브/로드"
+      icon={<HardDrive className="w-5 h-5 text-gray-200" />}
+    >
+      {toast ? (
+        <div className={`mb-4 rounded-2xl border px-4 py-3 text-sm ${toast.ok ? 'bg-emerald-500/10 border-emerald-400/20 text-emerald-100' : 'bg-rose-500/10 border-rose-400/20 text-rose-100'}`}>
+          {toast.msg}
+        </div>
+      ) : null}
+
+      <div className="space-y-3">
+        {[1, 2, 3].map((slot) => (
+          <div key={slot} className="rounded-2xl border border-white/10 bg-white/5 p-4 flex flex-wrap items-center gap-2">
+            <div className="text-sm font-semibold text-white">슬롯 {slot}</div>
+            <div className="ml-auto flex flex-wrap gap-2">
+              <button
+                disabled={busy != null}
+                onClick={() => run(slot, onSave, '저장 완료', '저장 실패')}
+                className="px-3 py-2 rounded-xl bg-blue-600/80 hover:bg-blue-500 border border-blue-400/30 font-semibold disabled:opacity-40"
+              >
+                <span className="inline-flex items-center gap-2"><Save className="w-4 h-4" />저장</span>
+              </button>
+              <button
+                disabled={busy != null}
+                onClick={() => run(slot, onLoad, '로드 완료', '로드 실패')}
+                className="px-3 py-2 rounded-xl bg-emerald-600/80 hover:bg-emerald-500 border border-emerald-400/30 font-semibold disabled:opacity-40"
+              >
+                <span className="inline-flex items-center gap-2"><FolderOpen className="w-4 h-4" />로드</span>
+              </button>
+              <button
+                disabled={busy != null}
+                onClick={() => run(slot, onDelete, '삭제 완료', '삭제 실패')}
+                className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-500 border border-rose-400/30 font-semibold disabled:opacity-40"
+              >
+                <span className="inline-flex items-center gap-2"><Trash2 className="w-4 h-4" />삭제</span>
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </ModalShell>
   );
 }
 
 /* =========================
-   7) MAIN
+   9) Page
 ========================= */
 export default function Page() {
-  const audio = useAudioEngine();
+  const audio = useAudioBus();
 
-  const gameCase = GAME_DB.cases[0];
-  const compiled = useMemo(() => compileCase(gameCase), []);
-  const lines = compiled.lines;
+  const game = useMemo(() => compileGame(GAME_DB), []);
+  const [state, dispatch] = useReducer((s, a) => reducer(game, s, a), undefined, () => initialState(game));
+  const view = useMemo(() => deriveView(game, state), [game, state]);
 
-  const hpMax = gameCase.hpMax ?? 7;
-  const evMax = Object.keys(GAME_DB.evidence).length;
-
-  const [index, setIndex] = useState(0);
-  const [bgKey, setBgKey] = useState(gameCase.coverBgKey || 'court');
-  const [hp, setHp] = useState(hpMax);
-
+  // ui overlay
+  const [muted, setMuted] = useState(false);
+  const [bgUrl, setBgUrl] = useState(null);
   const [shake, setShake] = useState(false);
   const [flash, setFlash] = useState(false);
-  const [effectText, setEffectText] = useState(null);
   const [overlayMsg, setOverlayMsg] = useState(null);
-  const [speedPulse, setSpeedPulse] = useState(0);
+  const [effectText, setEffectText] = useState(null);
 
-  const [evidenceMode, setEvidenceMode] = useState(false);
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const [combineOpen, setCombineOpen] = useState(false);
+  const [examineOpen, setExamineOpen] = useState(false);
+  const [admissionOpen, setAdmissionOpen] = useState(false);
+  const [saveOpen, setSaveOpen] = useState(false);
 
-  const [pressMode, setPressMode] = useState(false);
-  const [pressIndex, setPressIndex] = useState(0);
+  const [examineKey, setExamineKey] = useState(null);
+  const [admissionKey, setAdmissionKey] = useState(null);
 
-  const [ceIndex, setCeIndex] = useState(0);
-  const [ceLocked, setCeLocked] = useState(false);
+  // admission state: basic (manual)
+  const [admission, setAdmission] = useState(() => {
+    const a = { admitted: new Set(), denied: new Map(), pending: new Map() };
+    // 기본은 “초기 증거”는 채택되어 있다고 가정(플레이 막힘 방지)
+    for (const k of game.initialEvidence || []) a.admitted.add(k);
+    return a;
+  });
 
-  const [isEnding, setIsEnding] = useState(false);
-  const [gameOver, setGameOver] = useState(false);
+  const [combineA, setCombineA] = useState(null);
+  const [combineB, setCombineB] = useState(null);
 
-  const [invKeys, setInvKeys] = useState(gameCase.initialEvidence || []);
+  const doShake = (ms = 320) => (setShake(true), setTimeout(() => setShake(false), ms));
+  const doFlash = (ms = 140) => (setFlash(true), setTimeout(() => setFlash(false), ms));
+  const doOverlay = (t, ms = 1000) => (setOverlayMsg(t), setTimeout(() => setOverlayMsg(null), ms));
+  const doEffect = (t, ms = 850) => (setEffectText(t), setTimeout(() => setEffectText(null), ms));
 
-  // SPEED GAME STATE
-  const BASE_TIME = 7.5;
-  const [timeMax, setTimeMax] = useState(BASE_TIME);
-  const [timeLeft, setTimeLeft] = useState(BASE_TIME);
+  // bg update (image optional)
+  useEffect(() => {
+    // optional: you can map bgKey to image if you place files
+    // example mapping: /assets/bg/<bgKey>.webp
+    const candidate = `/assets/bg/${view.bgKey}.webp`;
+    preloadImage(candidate).then((ok) => setBgUrl(ok ? candidate : null));
+  }, [view.bgKey]);
 
-  const [combo, setCombo] = useState(0);
-  const [mult, setMult] = useState(1.0);
+  // bgm update (optional if you place files: /assets/bgm/<key>.ogg)
+  useEffect(() => {
+    const line = view.line;
+    if (!line || line.type !== 'scene') return;
+    if (!line.bgmKey) return;
+    const url = `/assets/bgm/${line.bgmKey}.ogg`;
+    audio.playBgm(line.bgmKey, url).catch(() => {});
+  }, [view.line?.type, view.line?.bgmKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const timeLeftRef = useLatestRef(timeLeft);
-  const timeMaxRef = useLatestRef(timeMax);
-  const comboRef = useLatestRef(combo);
-  const multRef = useLatestRef(mult);
-  const hpRef = useLatestRef(hp);
+  useEffect(() => {
+    audio.setMuted(muted).catch(() => {});
+  }, [muted]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const currentLine = lines[index] || {};
-  const isCE = currentLine.type === 'cross_exam';
-  const stmt = isCE ? currentLine.statements?.[ceIndex] : null;
-
-  const bgClass = useMemo(() => safeGet(GAME_DB, `backgrounds.${bgKey}`, GAME_DB.backgrounds.court), [bgKey]);
-
-  const witnessCharKey = isCE ? currentLine.witnessCharKey : null;
-  const witnessChar = witnessCharKey ? GAME_DB.characters[witnessCharKey] : null;
-
-  const text = useMemo(() => {
-    if (pressMode && stmt?.pressResponse?.[pressIndex]?.text) return stmt.pressResponse[pressIndex].text;
-    if (isCE) return stmt?.text || '';
-    return currentLine.text || '';
-  }, [pressMode, stmt, pressIndex, isCE, currentLine.text]);
-
-  const speaker = useMemo(() => {
-    if (pressMode && stmt?.pressResponse?.[pressIndex]?.charKey) return GAME_DB.characters[stmt.pressResponse[pressIndex].charKey] || null;
-    if (isCE) return witnessChar || GAME_DB.characters.witness1;
-    if (currentLine.charKey) return GAME_DB.characters[currentLine.charKey] || null;
-    return null;
-  }, [pressMode, stmt, pressIndex, isCE, currentLine.charKey, witnessChar]);
-
-  const face = useMemo(() => {
-    if (pressMode && stmt?.pressResponse?.[pressIndex]?.face) return stmt.pressResponse[pressIndex].face;
-    return currentLine.face || 'normal';
-  }, [pressMode, stmt, pressIndex, currentLine.face]);
-
-  const invItems = useMemo(() => {
-    return invKeys
-      .map((k) => {
-        const ev = GAME_DB.evidence[k];
-        if (!ev) return null;
-        return { key: k, ...ev };
-      })
-      .filter(Boolean);
-  }, [invKeys]);
-
-  const canTapAdvance = !evidenceMode && !isEnding && !gameOver && !ceLocked;
-
-  const sfx = (key) => {
-    const cfg = GAME_DB.sfx[key];
-    if (!cfg) return;
-    audio.sfxBeep(cfg.freq, cfg.dur, cfg.vol, cfg.type);
+  const unlock = async () => {
+    await audio.unlock();
+  };
+  const sfx = async (k) => {
+    // optional sfx file
+    const url = `/assets/sfx/${k}.ogg`;
+    await audio.playSfx(k, url).catch(() => {});
   };
 
-  const doFlash = (ms = 220) => {
-    setFlash(true);
-    setTimeout(() => setFlash(false), ms);
-  };
-  const doShake = (ms = 520) => {
-    setShake(true);
-    setTimeout(() => setShake(false), ms);
-  };
-  const doEffect = (t, ms = 1200) => {
-    setEffectText(t);
-    setTimeout(() => setEffectText(null), ms);
-  };
-  const doOverlay = (t, ms = 1200) => {
-    setOverlayMsg(t);
-    setTimeout(() => setOverlayMsg(null), ms);
-  };
-  const pulse = (power = 1) => {
-    setSpeedPulse((p) => Math.max(p, 0.35 * power));
-    setTimeout(() => setSpeedPulse((p) => Math.max(0, p - 0.25 * power)), 90);
-    setTimeout(() => setSpeedPulse((p) => Math.max(0, p - 0.18 * power)), 180);
-  };
-
-  const advance = (d = 1) => setIndex((p) => clamp(p + d, 0, lines.length - 1));
-
-  const computeSpeed = (tLeft, tMax, comboV) => {
-    const tp = tMax > 0 ? clamp(tLeft / tMax, 0, 1) : 1;
-    const pressure = 1 - tp;
-    const streak = clamp(comboV / 12, 0, 1);
-    return clamp(0.15 + pressure * 0.55 + streak * 0.45, 0, 1);
-  };
-
-  const speed = useMemo(() => computeSpeed(timeLeft, timeMax, combo), [timeLeft, timeMax, combo]);
-  const danger = useMemo(() => {
-    const tp = timeMax > 0 ? clamp(timeLeft / timeMax, 0, 1) : 1;
-    return clamp((0.35 - tp) / 0.35, 0, 1);
-  }, [timeLeft, timeMax]);
-
-  const resetSpeedState = (hard = false) => {
-    setTimeMax(BASE_TIME);
-    setTimeLeft(BASE_TIME);
-    if (hard) {
-      setCombo(0);
-      setMult(1.0);
+  // scene auto-advance
+  useEffect(() => {
+    if (view.line?.type === 'scene') {
+      dispatch({ type: AT.NEXT });
     }
-  };
+  }, [view.line?.type]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const reset = () => {
-    setIndex(0);
-    setBgKey(gameCase.coverBgKey || 'court');
-    setHp(hpMax);
-    setShake(false);
-    setFlash(false);
-    setEffectText(null);
-    setOverlayMsg(null);
-    setSpeedPulse(0);
-    setEvidenceMode(false);
-    setPressMode(false);
-    setPressIndex(0);
-    setCeIndex(0);
-    setCeLocked(false);
-    setIsEnding(false);
-    setGameOver(false);
-    setInvKeys(gameCase.initialEvidence || []);
-    resetSpeedState(true);
-    audio.playBgm(GAME_DB.bgm[gameCase.defaultBgmKey] || GAME_DB.bgm.trial);
-  };
-
-  // init BGM
+  // anim auto effect
   useEffect(() => {
-    audio.playBgm(GAME_DB.bgm[gameCase.defaultBgmKey] || GAME_DB.bgm.trial);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // speed -> bgm mod
-  useEffect(() => {
-    audio.setBgmSpeed(speed);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [speed]);
-
-  // timer tick loop
-  useEffect(() => {
-    if (!isCE) return;
-    if (evidenceMode || ceLocked || pressMode || isEnding || gameOver) return;
-
-    let raf = 0;
-    let last = 0;
-
-    const loop = (ts) => {
-      raf = requestAnimationFrame(loop);
-      if (!last) last = ts;
-      const dt = Math.min(0.05, Math.max(0, (ts - last) / 1000));
-      last = ts;
-
-      setTimeLeft((p) => Math.max(0, p - dt));
-
-      if (danger > 0.6 && Math.random() < 0.18) sfx('tick');
-      if (Math.random() < 0.06 && danger > 0.6) pulse(0.8);
-    };
-
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isCE, evidenceMode, ceLocked, pressMode, isEnding, gameOver, danger]);
-
-  // timeout penalty
-  useEffect(() => {
-    if (!isCE) return;
-    if (evidenceMode || ceLocked || pressMode || isEnding || gameOver) return;
-    if (timeLeft > 0) return;
-
-    const timeoutPenalty = () => {
-      doOverlay('시간 초과! 압박에 밀렸다…', 1000);
-      doShake(420);
-      doFlash(140);
-      sfx('fail');
-      pulse(1);
-
-      setCombo(0);
-      setMult(1.0);
-      setHp((h) => Math.max(0, h - 1));
-
-      const len = currentLine.statements?.length || 0;
-      if (len > 0) {
-        if (ceIndex < len - 1) setCeIndex((p) => p + 1);
-        else {
-          setCeIndex(0);
-          advance(1);
-        }
+    if (view.line?.type === 'anim') {
+      if (view.line.name === 'objection') {
+        doEffect('OBJECTION!');
+        doFlash();
+        sfx('objection');
+      } else if (view.line.name === 'flash') {
+        doFlash();
+        sfx('flash');
       } else {
-        advance(1);
+        doFlash();
       }
-      setTimeLeft(timeMaxRef.current || BASE_TIME);
+      dispatch({ type: AT.NEXT });
+    }
+  }, [view.line?.type]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // helpers for present
+  const doPresent = async (key) => {
+    await unlock();
+    await sfx('flash');
+    doFlash();
+
+    const prevHp = state.hp;
+    dispatch({ type: AT.PRESENT, key });
+
+    setTimeout(async () => {
+      if (state.hp < prevHp) {
+        doShake();
+        doOverlay('틀렸다.');
+        await sfx('fail');
+      } else {
+        doEffect('OBJECTION!');
+        doOverlay('모순이다.');
+        await sfx('objection');
+      }
+    }, 80);
+  };
+
+  // combine apply
+  const applyCombine = async () => {
+    const a = combineA;
+    const b = combineB;
+    if (!a || !b) {
+      doOverlay('두 개를 골라라.');
+      return;
+    }
+    const req = [a, b].sort().join('::');
+    const hit = (game.combinations || []).find((c) => (c.req || []).slice().sort().join('::') === req);
+
+    setCombineOpen(false);
+    setCombineA(null);
+    setCombineB(null);
+
+    if (!hit) {
+      doOverlay('아무 일도 없다.');
+      return;
+    }
+
+    const resultKey = hit.result;
+    if (!state.inv.includes(resultKey)) {
+      const inv = Array.from(new Set([...state.inv, resultKey]));
+      const nextState = { ...state, inv };
+      dispatch({ type: AT.HYDRATE, state: nextState });
+    }
+    doOverlay(hit.successMsg || '새로운 단서가 생겼다.');
+    await sfx('admit');
+  };
+
+  // examine found
+  const onHotspotFound = async (h) => {
+    if (!h?.resultEvidenceKey) return;
+    const key = h.resultEvidenceKey;
+    if (!state.inv.includes(key)) {
+      const inv = Array.from(new Set([...state.inv, key]));
+      dispatch({ type: AT.HYDRATE, state: { ...state, inv } });
+    }
+    doOverlay(h.successMsg || '단서를 찾았다.');
+    await sfx('admit');
+  };
+
+  // admission ops
+  const openAdmission = (key) => {
+    setAdmissionKey(key);
+    setAdmissionOpen(true);
+  };
+  const offerAdmission = () => {
+    if (!admissionKey) return;
+    const res = requestAdmission(admission, admissionKey);
+    setAdmission(res.state);
+    doOverlay('신청했다.');
+  };
+  const admitEvidence = () => {
+    if (!admissionKey) return;
+    const req = Array.from(admission.pending.values()).find((r) => r.evidenceKey === admissionKey);
+    if (!req) return;
+    const next = ruleAdmission(admission, req.requestId, 'ADMIT');
+    setAdmission(next);
+    doOverlay('채택됐다.');
+  };
+  const denyEvidence = () => {
+    if (!admissionKey) return;
+    const req = Array.from(admission.pending.values()).find((r) => r.evidenceKey === admissionKey);
+    if (!req) return;
+    const next = ruleAdmission(admission, req.requestId, 'DENY');
+    setAdmission(next);
+    doOverlay('기각됐다.');
+  };
+
+  // save/load
+  const onSave = async (slot) => {
+    const blob = {
+      schema: 1,
+      savedAt: new Date().toISOString(),
+      state,
+      admission: {
+        admitted: Array.from(admission.admitted.values()),
+        denied: Array.from(admission.denied.entries()),
+        pending: Array.from(admission.pending.entries()),
+      },
+      combine: { a: combineA, b: combineB },
     };
-
-    timeoutPenalty();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timeLeft]);
-
-  // CE statement change -> reset timer
-  useEffect(() => {
-    if (!isCE) return;
-    const c = comboRef.current || 0;
-    const m = multRef.current || 1.0;
-    const base = BASE_TIME;
-    const shrink = clamp(c / 18, 0, 1) * 1.6;
-    const add = clamp((m - 1) / 1.2, 0, 1) * 0.6;
-    const tm = clamp(base - shrink + add, 4.6, 8.0);
-    setTimeMax(tm);
-    setTimeLeft(tm);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isCE, ceIndex, index]);
-
-  // auto-handle scene/anim/end
-  useEffect(() => {
-    if (!currentLine?.type) return;
-
-    if (currentLine.type === 'scene') {
-      if (currentLine.bgKey) setBgKey(currentLine.bgKey);
-      if (currentLine.bgmKey) audio.playBgm(GAME_DB.bgm[currentLine.bgmKey] || null);
-      advance(1);
-      return;
+    const res = lsSave(slot, blob);
+    return { ok: res.ok, msg: res.ok ? `슬롯 ${slot} 저장 완료` : `저장 실패: ${res.reason}` };
+  };
+  const onLoad = async (slot) => {
+    const res = lsLoad(slot);
+    if (!res.ok) return { ok: false, msg: `로드 실패: ${res.reason}` };
+    const data = res.data;
+    if (data?.state) dispatch({ type: AT.HYDRATE, state: data.state });
+    if (data?.admission) {
+      setAdmission({
+        admitted: new Set(data.admission.admitted || []),
+        denied: new Map(data.admission.denied || []),
+        pending: new Map(data.admission.pending || []),
+      });
     }
-
-    if (currentLine.type === 'anim') {
-      if (currentLine.name === 'flash') {
-        doFlash(240);
-        sfx(currentLine.sfxKey || 'flash');
-        pulse(0.6);
-        setTimeout(() => advance(1), 260);
-        return;
-      }
-      if (currentLine.name === 'objection') {
-        doEffect('OBJECTION!', 1200);
-        doShake(520);
-        doFlash(220);
-        sfx(currentLine.sfxKey || 'objection');
-        pulse(1);
-        setTimeout(() => advance(1), 900);
-        return;
-      }
-      if (currentLine.name === 'victory') {
-        doEffect('VICTORY', 1600);
-        sfx(currentLine.sfxKey || 'success');
-        pulse(0.8);
-        setTimeout(() => advance(1), 1400);
-        return;
-      }
-      advance(1);
-      return;
-    }
-
-    if (currentLine.type === 'end') {
-      setIsEnding(true);
-      audio.playBgm(GAME_DB.bgm.victory);
-      return;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [index]);
-
-  // HP -> game over
-  useEffect(() => {
-    if (hp <= 0 && !gameOver) {
-      setGameOver(true);
-      setEvidenceMode(false);
-      setPressMode(false);
-      setCeLocked(false);
-      audio.playBgm(null);
-      sfx('fail');
-      doOverlay('판사님이 더는 들어주지 않습니다.', 1500);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hp]);
-
-  const handlePress = () => {
-    if (!isCE || !stmt?.pressResponse?.length) return;
-    setPressMode(true);
-    setPressIndex(0);
-    doOverlay(stmt.press || '추궁!', 900);
-    sfx('tap');
-    pulse(0.35);
+    setCombineA(data?.combine?.a || null);
+    setCombineB(data?.combine?.b || null);
+    return { ok: true, msg: `슬롯 ${slot} 로드 완료` };
+  };
+  const onDelete = async (slot) => {
+    const res = lsDelete(slot);
+    return { ok: res.ok, msg: res.ok ? `슬롯 ${slot} 삭제 완료` : `삭제 실패: ${res.reason}` };
   };
 
-  const handlePressNext = () => {
-    if (!stmt?.pressResponse?.length) {
-      setPressMode(false);
-      setPressIndex(0);
-      return;
-    }
-    if (pressIndex < stmt.pressResponse.length - 1) setPressIndex((p) => p + 1);
-    else {
-      setPressMode(false);
-      setPressIndex(0);
-    }
-  };
-
-  const handleNext = () => {
-    if (!canTapAdvance) return;
-    sfx('tap');
-    pulse(0.25);
-
-    if (pressMode) {
-      handlePressNext();
-      return;
-    }
-
-    if (isCE) {
-      const len = currentLine.statements?.length || 0;
-      if (len <= 0) {
-        advance(1);
-        return;
-      }
-      if (ceIndex < len - 1) setCeIndex((p) => p + 1);
-      else {
-        setCeIndex(0);
-        advance(1);
-      }
-      return;
-    }
-
-    advance(1);
-  };
-
-  const applyPenalty = (msg) => {
-    doOverlay(msg || '그 증거는 맞지 않습니다!', 1200);
-    doShake(520);
-    sfx('fail');
-    pulse(0.9);
-    setHp(Math.max(0, hpRef.current - 1));
-    setCombo(0);
-    setMult(1.0);
-    setTimeLeft(timeMaxRef.current || BASE_TIME);
-  };
-
-  const applyCorrect = () => {
-    setCeLocked(true);
-    setEvidenceMode(false);
-
-    const tl = timeLeftRef.current || 0;
-    const tm = timeMaxRef.current || BASE_TIME;
-    const tp = tm > 0 ? clamp(tl / tm, 0, 1) : 0;
-    const nearMiss = tp < 0.18;
-    const perfect = tp > 0.72;
-
-    doEffect('OBJECTION!', 1100);
-    doFlash(240);
-    doShake(520);
-    sfx('objection');
-    pulse(1.2);
-
-    setCombo((c) => c + 1);
-    setMult((m) => clamp(m + (perfect ? 0.14 : nearMiss ? 0.18 : 0.1), 1.0, 2.25));
-
-    const bonus = (perfect ? 1.2 : nearMiss ? 1.55 : 0.95) + clamp(comboRef.current / 20, 0, 1) * 0.5;
-    setTimeLeft(clamp((timeMaxRef.current || BASE_TIME) * bonus, 2.2, 10.0));
-
-    doOverlay(perfect ? '완벽한 타이밍!' : nearMiss ? '아슬아슬하게 잡았다!' : '모순이다!', 900);
-
-    setTimeout(() => {
-      setCeLocked(false);
-      setCeIndex(0);
-      advance(1);
-    }, 980);
-  };
-
-  const presentEvidence = (key) => {
-    if (!isCE || !stmt) {
-      doOverlay('법정 심문에서만 제시 가능합니다.', 1000);
-      sfx('fail');
-      pulse(0.6);
-      return;
-    }
-    if (stmt.weakness && stmt.contradiction === key) applyCorrect();
-    else applyPenalty(stmt.failMsg || '그 증거는 맞지 않습니다!');
-  };
-
-  const turnCounter = useMemo(() => {
-    let t = 1;
-    for (let i = 0; i < index; i++) {
-      const l = lines[i];
-      if (!l) continue;
-      if (l.type === 'cross_exam') {
-        const n = l.statements?.length || 0;
-        t += Math.max(1, n);
-      } else if (l.type === 'talk') t += 1;
-      else if (l.type === 'anim') t += 1;
-      else if (l.type === 'scene') t += 0;
-      else t += 1;
-    }
-    if (isCE) t += ceIndex;
-    return t;
-  }, [index, isCE, ceIndex, lines]);
-
-  const hint = isCE && stmt?.weakness ? '팁: 이 문장에 모순이 있습니다. 알맞은 증거를 제시하세요.' : null;
-
-  // Ending UI
-  if (isEnding) {
+  // end screens
+  if (state.gameOver) {
     return (
-      <div className={`h-screen w-full ${GAME_DB.backgrounds.ending} text-white flex flex-col items-center justify-center p-8 relative overflow-hidden`}>
-        <style jsx global>{globalCss}</style>
-        <div className="absolute inset-0 opacity-10 pointer-events-none">
-          <div className="absolute top-0 left-0 w-96 h-96 bg-blue-500 rounded-full blur-3xl"></div>
-          <div className="absolute bottom-0 right-0 w-96 h-96 bg-purple-500 rounded-full blur-3xl"></div>
-        </div>
-        <div className="relative z-10 text-center">
-          <Scale className="w-24 h-24 mx-auto mb-8 text-blue-400" strokeWidth={1.5} />
-          <h1 className="text-6xl md:text-7xl font-bold mb-6 tracking-tight" style={{ fontFamily: 'Crimson Pro, serif' }}>
-            {gameCase.title}
-          </h1>
-          <div className="w-24 h-1 bg-gradient-to-r from-transparent via-blue-400 to-transparent mx-auto mb-8"></div>
-          <p className="text-lg md:text-xl text-gray-300 mb-10 max-w-xl mx-auto leading-relaxed" style={{ fontFamily: 'Inter, sans-serif' }}>
-            “확정”은 무너지고, 시간축은 잠겼다.
-            <br />
-            압박 속에서도, 네가 먼저 모순을 꿰뚫었다.
-          </p>
+      <div className={`min-h-screen ${GAME_DB.backgrounds.gameover || 'bg-gradient-to-br from-black via-red-950 to-slate-950'} text-white flex items-center justify-center p-6`}>
+        <style jsx global>{GLOBAL_CSS}</style>
+        <div className="w-full max-w-lg rounded-3xl bg-black/60 border border-white/10 backdrop-blur-xl p-8 text-center">
+          <div className="text-6xl mb-4">💥</div>
+          <div className="text-4xl font-bold mb-3" style={{ fontFamily: 'Crimson Pro, serif' }}>
+            게임 오버
+          </div>
+          <div className="text-gray-300 mb-8" style={{ fontFamily: 'Inter, sans-serif' }}>
+            페널티가 누적됐다.
+          </div>
           <button
-            onClick={reset}
-            className="tap-scale px-10 py-4 bg-white text-black font-semibold rounded-md hover:bg-gray-100 transition-all duration-300"
-            style={{ fontFamily: 'Inter, sans-serif' }}
+            onClick={() => {
+              setAdmission(() => {
+                const a = { admitted: new Set(), denied: new Map(), pending: new Map() };
+                for (const k of game.initialEvidence || []) a.admitted.add(k);
+                return a;
+              });
+              dispatch({ type: AT.RESET });
+            }}
+            className="px-6 py-3 rounded-xl bg-white text-black font-semibold"
           >
-            처음부터 다시하기
+            다시 시작
           </button>
         </div>
       </div>
     );
   }
 
-  // Game Over UI
-  if (gameOver) {
+  if (state.ending) {
     return (
-      <div className={`h-screen w-full ${GAME_DB.backgrounds.gameover} text-white flex items-center justify-center p-8 relative overflow-hidden`}>
-        <style jsx global>{globalCss}</style>
-        <div className="absolute inset-0 opacity-20 pointer-events-none">
-          <div className="absolute -top-24 -left-24 w-[28rem] h-[28rem] bg-red-600 rounded-full blur-3xl"></div>
-          <div className="absolute -bottom-24 -right-24 w-[28rem] h-[28rem] bg-blue-600 rounded-full blur-3xl"></div>
-        </div>
-
-        <div className="relative z-10 max-w-xl w-full bg-black/60 border border-white/10 backdrop-blur-xl rounded-3xl p-8 text-center">
-          <div className="text-6xl mb-4">💥</div>
-          <h1 className="text-4xl font-bold mb-3" style={{ fontFamily: 'Crimson Pro, serif' }}>
-            게임 오버
-          </h1>
-          <p className="text-gray-300 mb-8" style={{ fontFamily: 'Inter, sans-serif' }}>
-            시간 압박에 밀렸습니다.
-            <br />
-            콤보를 지키며 모순을 더 빨리 잡으세요.
-          </p>
-
-          <div className="flex items-center justify-center gap-3">
-            <button
-              onClick={reset}
-              className="tap-scale px-6 py-3 bg-white text-black font-semibold rounded-xl transition-all"
-              style={{ fontFamily: 'Inter, sans-serif' }}
-            >
-              다시 시작
-            </button>
+      <div className={`min-h-screen ${GAME_DB.backgrounds.ending} text-white flex items-center justify-center p-6`}>
+        <style jsx global>{GLOBAL_CSS}</style>
+        <div className="w-full max-w-2xl rounded-3xl bg-black/60 border border-white/10 backdrop-blur-xl p-8 text-center">
+          <Scale className="w-20 h-20 mx-auto mb-5 text-blue-400" />
+          <div className="text-6xl font-bold mb-3" style={{ fontFamily: 'Crimson Pro, serif' }}>
+            {GAME_DB.meta.title}
           </div>
+          <div className="text-gray-300 mb-8" style={{ fontFamily: 'Inter, sans-serif' }}>
+            {GAME_DB.meta.description}
+          </div>
+          <button onClick={() => dispatch({ type: AT.RESET })} className="px-6 py-3 rounded-xl bg-white text-black font-semibold">
+            다시하기
+          </button>
         </div>
       </div>
     );
   }
 
-  const speedLayerIntensity = clamp(speed * (isCE ? 1 : 0.4), 0, 1);
+  // top background
+  const bgStyle = bgUrl
+    ? { backgroundImage: `url(${bgUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }
+    : undefined;
+
+  const admittedSet = admission.admitted instanceof Set ? admission.admitted : new Set();
+
+  const speaker = view.speaker;
+  const avatar = view.avatar;
+
+  const pressable = view.isCE && !!view.stmt?.pressQ && (view.stmt?.press?.length || 0) > 0;
+  const weakNow = !!view.stmt?.weakness;
 
   return (
-    <div className={`h-screen w-full relative overflow-hidden select-none transition-all duration-700 ${bgClass} ${shake ? 'animate-shake' : ''}`}>
-      <style jsx global>{globalCss}</style>
+    <div className={`h-screen w-full relative overflow-hidden ${view.bgClass} ${shake ? 'animate-shake' : ''}`} style={bgStyle}>
+      <style jsx global>{GLOBAL_CSS}</style>
 
-      <SpeedLines intensity={speedLayerIntensity} pulse={speedPulse} danger={danger} />
+      {/* overlay */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-black/10 pointer-events-none" />
 
-      <div className="absolute inset-0 bg-gradient-to-t from-black/82 via-transparent to-transparent pointer-events-none z-[2]" />
+      {/* HUD */}
+      <div className="absolute top-0 left-0 right-0 z-50 safe-top">
+        <div className="px-4 pt-4">
+          <div className="flex items-center justify-between gap-3">
+            <Pill>
+              <div className="flex items-center gap-3">
+                <Scale className="w-5 h-5 text-blue-300" />
+                <div className="flex gap-1.5">
+                  {[...Array(state.hpMax)].map((_, i) => (
+                    <div key={i} className={`w-2 h-2 rounded-full ${i < state.hp ? 'bg-blue-400 shadow shadow-blue-400/40' : 'bg-gray-700'}`} />
+                  ))}
+                </div>
+              </div>
+            </Pill>
 
-      <TopHUD
-        hp={hp}
-        hpMax={hpMax}
-        evCount={invItems.length}
-        evMax={evMax}
-        onOpenEvidence={() => setEvidenceMode(true)}
-        muted={audio.muted}
-        onToggleMute={() => audio.setMasterMuted(!audio.muted)}
-        turn={turnCounter}
-        combo={combo}
-        mult={mult}
-        timeLeft={timeLeft}
-        timeMax={timeMax}
-        speed={speed}
-        danger={danger}
-      />
+            <div className="flex items-center gap-2">
+              <button
+                onClick={async () => {
+                  await unlock();
+                  setSaveOpen(true);
+                  await sfx('tap');
+                }}
+                className="w-11 h-11 rounded-full bg-black/45 border border-white/10 hover:border-white/20 backdrop-blur-md flex items-center justify-center"
+                aria-label="save"
+              >
+                <HardDrive className="w-5 h-5 text-gray-200" />
+              </button>
 
-      <EffectLayer effectText={effectText} flash={flash} overlayMsg={overlayMsg} speedPulse={speedPulse} danger={danger} />
+              <button
+                onClick={async () => {
+                  await unlock();
+                  setMuted((m) => !m);
+                  await sfx('tap');
+                }}
+                className="w-11 h-11 rounded-full bg-black/45 border border-white/10 hover:border-white/20 backdrop-blur-md flex items-center justify-center"
+                aria-label="mute"
+              >
+                {muted ? <VolumeX className="w-5 h-5 text-gray-200" /> : <Volume2 className="w-5 h-5 text-gray-200" />}
+              </button>
 
-      <CharacterAvatar char={speaker} face={face} speed={speed} />
+              <button
+                onClick={async () => {
+                  await unlock();
+                  setEvidenceOpen(true);
+                  dispatch({ type: AT.OPEN_EVIDENCE });
+                  await sfx('tap');
+                }}
+                className="h-11 px-4 rounded-full bg-black/45 border border-white/10 hover:border-white/20 backdrop-blur-md flex items-center gap-2"
+                aria-label="evidence"
+              >
+                <FileText className="w-5 h-5 text-amber-300" />
+                <span className="text-sm font-semibold text-white" style={{ fontFamily: 'Inter, sans-serif' }}>
+                  {state.inv.length}/{Object.keys(game.evidence || {}).length}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
 
-      {isCE && (
-        <CrossExamPill
-          title={currentLine.title}
-          isFinal={!!currentLine.isFinal}
-          cur={ceIndex + 1}
-          total={currentLine.statements?.length || 0}
-          witnessName={witnessChar?.name || '증인'}
-          combo={combo}
-          mult={mult}
-          danger={danger}
-        />
-      )}
+        {/* CE bar */}
+        {view.isCE ? (
+          <div className="px-4 mt-3">
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border bg-blue-950/70 border-blue-500/40 text-blue-200 backdrop-blur-md">
+              <AlertCircle className="w-4 h-4" />
+              <span className="text-xs font-semibold" style={{ fontFamily: 'Inter, sans-serif' }}>
+                {view.ceTitle} · {view.ceIndex + 1}/{view.ceTotal} {weakNow ? '· 약점' : ''}
+              </span>
+            </div>
+          </div>
+        ) : null}
+      </div>
 
-      <DialogueBox
-        char={speaker}
-        text={text}
-        colorClass={currentLine.color}
-        sizeClass={currentLine.size}
-        onNext={handleNext}
-        isCE={isCE}
-        pressMode={pressMode}
-        onPress={handlePress}
-        onOpenEvidence={() => setEvidenceMode(true)}
-        danger={danger}
-      />
+      {/* FX */}
+      {effectText ? (
+        <div className="absolute inset-0 z-[60] flex items-center justify-center pointer-events-none">
+          <div className="relative bg-black/35 backdrop-blur-sm rounded-3xl px-8 py-6 border border-white/10">
+            <div className="absolute inset-0 bg-white/10 blur-3xl animate-pulse" />
+            <div className="relative text-6xl md:text-7xl font-black tracking-tight text-white" style={{ fontFamily: 'Crimson Pro, serif' }}>
+              {effectText}
+            </div>
+          </div>
+        </div>
+      ) : null}
 
-      {evidenceMode && (
-        <EvidenceModal
-          items={invItems}
-          isTrial={isCE}
-          hint={hint}
-          onClose={() => setEvidenceMode(false)}
-          onPresent={presentEvidence}
-          onReset={reset}
-        />
-      )}
+      {overlayMsg ? (
+        <div className="absolute inset-0 z-[55] flex items-start justify-center pt-24 pointer-events-none animate-fade-in">
+          <div className="px-5 py-3 rounded-2xl bg-black/70 border border-white/10 backdrop-blur-xl text-white text-sm font-semibold">
+            {overlayMsg}
+          </div>
+        </div>
+      ) : null}
 
-      {/* Mobile mini HUD (정렬) */}
-      <div className="absolute left-1/2 -translate-x-1/2 z-[35] md:hidden pointer-events-none" style={{ bottom: 'calc(160px + var(--safe-bot) + 12px)' }}>
-        <div className={`px-4 py-2 rounded-full backdrop-blur-xl border ${danger > 0.6 ? 'bg-red-950/55 border-red-400/20' : 'bg-black/45 border-white/10'}`}>
-          <div className="flex items-center gap-2 text-xs font-black tabular-nums text-white">
-            <Zap className="w-4 h-4 text-amber-300" />
-            x{mult.toFixed(2)}
-            <span className="text-amber-200/90 font-semibold ml-1">COMBO {combo}</span>
+      {flash ? <div className="absolute inset-0 z-[50] bg-white/20 pointer-events-none" /> : null}
+
+      {/* Character */}
+      {speaker ? (
+        <div className="absolute inset-x-0 bottom-[220px] md:bottom-[240px] flex items-center justify-center z-20 pointer-events-none">
+          <div className="relative animate-fade-in">
+            <div className="absolute inset-0 rounded-full blur-2xl opacity-30" style={{ backgroundColor: speaker.color }} />
+            {avatar ? (
+              <img src={avatar} alt={speaker.name} className="relative w-28 h-28 md:w-32 md:h-32 rounded-full border-2 border-white/20 shadow-2xl" />
+            ) : (
+              <div className="relative w-28 h-28 md:w-32 md:h-32 rounded-full border-2 border-white/20 shadow-2xl bg-white/5" />
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Dialogue */}
+      <div className="absolute bottom-0 left-0 right-0 z-40 safe-bottom">
+        <div className="p-4 md:p-6">
+          <div className="max-w-5xl mx-auto">
+            {/* name tag */}
+            {speaker?.name ? (
+              <div className="mb-2 ml-2">
+                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-t-xl bg-black/60 border border-white/10">
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: speaker.color }} />
+                  <span className="text-xs font-semibold text-white" style={{ fontFamily: 'Inter, sans-serif' }}>
+                    {speaker.name}
+                  </span>
+                </div>
+              </div>
+            ) : null}
+
+            <div
+              onClick={async () => {
+                await unlock();
+                await sfx('tap');
+                dispatch({ type: AT.NEXT });
+              }}
+              className="relative bg-black/80 border border-white/10 rounded-2xl p-5 md:p-6 min-h-[170px] backdrop-blur-xl cursor-pointer hover:border-white/20 transition"
+            >
+              <div className="text-lg md:text-xl text-white leading-relaxed" style={{ fontFamily: 'Inter, sans-serif', fontWeight: 500 }}>
+                {view.text}
+              </div>
+
+              {/* actions inside box (no overlap) */}
+              {view.isCE ? (
+                <div className="mt-5 flex flex-wrap gap-2">
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      await unlock();
+                      await sfx('tap');
+                      dispatch({ type: AT.PRESS });
+                      if (view.stmt?.pressQ) doOverlay(view.stmt.pressQ);
+                    }}
+                    disabled={!pressable}
+                    className="px-4 py-2 rounded-xl bg-blue-600/80 hover:bg-blue-500 border border-blue-400/30 font-semibold flex items-center gap-2 disabled:opacity-40"
+                    style={{ fontFamily: 'Inter, sans-serif' }}
+                  >
+                    <Search className="w-4 h-4" />
+                    추궁
+                  </button>
+
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      await unlock();
+                      await sfx('tap');
+                      setEvidenceOpen(true);
+                      dispatch({ type: AT.OPEN_EVIDENCE });
+                    }}
+                    className="px-4 py-2 rounded-xl bg-amber-600/80 hover:bg-amber-500 border border-amber-400/30 font-semibold flex items-center gap-2"
+                    style={{ fontFamily: 'Inter, sans-serif' }}
+                  >
+                    <FileText className="w-4 h-4" />
+                    증거
+                  </button>
+
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      await unlock();
+                      await sfx('tap');
+                      dispatch({ type: AT.RESET });
+                      doOverlay('리셋');
+                    }}
+                    className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold flex items-center gap-2"
+                    style={{ fontFamily: 'Inter, sans-serif' }}
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    리셋
+                  </button>
+                </div>
+              ) : null}
+
+              <div className="absolute bottom-4 right-4 opacity-50 pointer-events-none">
+                <ChevronRight className="w-6 h-6 animate-pulse" />
+              </div>
+            </div>
+
+            {view.hint ? (
+              <div className="mt-3 text-xs text-gray-400" style={{ fontFamily: 'Inter, sans-serif' }}>
+                {view.hint}
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
+
+      {/* Evidence */}
+      <EvidenceModal
+        open={evidenceOpen && state.evidenceOpen}
+        onClose={async () => {
+          await unlock();
+          await sfx('tap');
+          setEvidenceOpen(false);
+          dispatch({ type: AT.CLOSE_EVIDENCE });
+        }}
+        inventory={state.inv}
+        evidenceMap={game.evidence}
+        admittedSet={admittedSet}
+        hint={view.hint}
+        onPresent={(key) => doPresent(key)}
+        onExamine={(key) => {
+          setExamineKey(key);
+          setExamineOpen(true);
+        }}
+        onOpenCombine={() => {
+          setCombineOpen(true);
+        }}
+        onOpenAdmission={(key) => openAdmission(key)}
+      />
+
+      {/* Combine */}
+      <CombineModal
+        open={combineOpen}
+        onClose={() => {
+          setCombineOpen(false);
+          setCombineA(null);
+          setCombineB(null);
+        }}
+        inventory={state.inv}
+        evidenceMap={game.evidence}
+        a={combineA}
+        b={combineB}
+        onPickA={(k) => (k === combineB ? setCombineB(null) : null, setCombineA(k))}
+        onPickB={(k) => (k === combineA ? setCombineA(null) : null, setCombineB(k))}
+        onApply={applyCombine}
+      />
+
+      {/* Examine */}
+      <ExamineModal
+        open={examineOpen}
+        onClose={() => {
+          setExamineOpen(false);
+          setExamineKey(null);
+        }}
+        evidenceKey={examineKey}
+        evidence={examineKey ? game.evidence[examineKey] : null}
+        onFound={onHotspotFound}
+      />
+
+      {/* Admission */}
+      <AdmissionModal
+        open={admissionOpen}
+        onClose={() => {
+          setAdmissionOpen(false);
+          setAdmissionKey(null);
+        }}
+        evidenceKey={admissionKey}
+        evidence={admissionKey ? game.evidence[admissionKey] : null}
+        admission={admission}
+        onOffer={offerAdmission}
+        onAdmit={admitEvidence}
+        onDeny={denyEvidence}
+      />
+
+      {/* Save/Load */}
+      <SaveLoadModal
+        open={saveOpen}
+        onClose={() => setSaveOpen(false)}
+        onSave={onSave}
+        onLoad={onLoad}
+        onDelete={onDelete}
+      />
     </div>
   );
-}
-
-/* =========================
-   8) global CSS
-========================= */
-const globalCss = `
-@import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;600;700;900&family=Inter:wght@400;500;600;700;900&display=swap');
-
-:root{
-  color-scheme: dark;
-  --safe-top: env(safe-area-inset-top, 0px);
-  --safe-bot: env(safe-area-inset-bottom, 0px);
-  --safe-left: env(safe-area-inset-left, 0px);
-  --safe-right: env(safe-area-inset-right, 0px);
-  --hud-h: 64px;
-  --hud-gap: 12px;
-}
-*{ -webkit-tap-highlight-color: transparent; }
-html, body { height: 100%; }
-body { margin: 0; font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; overflow: hidden; }
-.tabular-nums { font-variant-numeric: tabular-nums; }
-
-/* press feedback */
-.tap-scale { transform: translateZ(0); }
-.tap-scale:active { transform: scale(0.96); }
-
-/* HUD layout */
-.hud-root{
-  position: absolute;
-  top: calc(var(--safe-top) + 12px);
-  left: calc(var(--safe-left) + 12px);
-  right: calc(var(--safe-right) + 12px);
-  z-index: 50;
-  pointer-events: none;
-}
-.hud-row{
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  gap: var(--hud-gap);
-}
-.hud-left, .hud-center, .hud-right{
-  display: flex;
-  align-items: center;
-  gap: var(--hud-gap);
-}
-.hud-left{ justify-content: flex-start; }
-.hud-center{ justify-content: center; }
-.hud-right{ justify-content: flex-end; pointer-events: auto; }
-
-.hud-pill{
-  pointer-events: auto;
-}
-.hud-pill-inner{
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  height: var(--hud-h);
-  padding: 0 16px;
-  border-radius: 999px;
-  background: rgba(0,0,0,0.40);
-  border: 1px solid rgba(255,255,255,0.10);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-}
-
-.hud-icon{
-  width: var(--hud-h);
-  height: var(--hud-h);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  background: rgba(0,0,0,0.40);
-  border: 1px solid rgba(255,255,255,0.10);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-}
-.hud-icon:hover{ border-color: rgba(255,255,255,0.20); }
-
-.hud-action{
-  height: var(--hud-h);
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 16px;
-  border-radius: 999px;
-  background: rgba(0,0,0,0.40);
-  border: 1px solid rgba(255,255,255,0.10);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-}
-.hud-action:hover{ border-color: rgba(255,255,255,0.20); }
-
-/* CrossExam pill: always below HUD */
-.ce-pill{
-  position: absolute;
-  top: calc(var(--safe-top) + 12px + var(--hud-h) + 14px);
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 40;
-  animation: slideUp 260ms ease-out both;
-  pointer-events: none;
-}
-
-/* Dialogue */
-.dialogue-wrap{
-  position: absolute;
-  left: 0; right: 0;
-  bottom: calc(var(--safe-bot) + 0px);
-  padding: 18px 18px calc(18px + var(--safe-bot));
-  z-index: 30;
-  cursor: pointer;
-}
-.dialogue-actions{
-  position: absolute;
-  top: -78px;
-  right: 0;
-  display: flex;
-  gap: 12px;
-}
-
-/* Animations */
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-.animate-fade-in { animation: fadeIn 220ms ease-out both; }
-
-@keyframes slideUp {
-  from { opacity: 0; transform: translate(-50%, 10px); }
-  to { opacity: 1; transform: translate(-50%, 0); }
-}
-.animate-slide-up { animation: slideUp 260ms ease-out both; }
-
-@keyframes shake {
-  0% { transform: translate3d(0,0,0); }
-  15% { transform: translate3d(-8px, 2px, 0); }
-  30% { transform: translate3d(7px, -2px, 0); }
-  45% { transform: translate3d(-6px, 2px, 0); }
-  60% { transform: translate3d(5px, -1px, 0); }
-  75% { transform: translate3d(-3px, 1px, 0); }
-  100% { transform: translate3d(0,0,0); }
-}
-.animate-shake { animation: shake 520ms cubic-bezier(.2,.9,.2,1) both; }
-
-@keyframes pulseSoft {
-  0% { transform: scale(0.98); opacity: 0.55; }
-  55% { transform: scale(1.02); opacity: 0.9; }
-  100% { transform: scale(1.0); opacity: 0.6; }
-}
-.pulse-soft { animation: pulseSoft 980ms ease-in-out infinite; }
-
-/* Responsive tune */
-@media (max-width: 420px){
-  :root{ --hud-h: 56px; --hud-gap: 10px; }
-  .hud-pill-inner{ padding: 0 12px; }
-  .hud-action{ padding: 0 12px; }
-  .dialogue-actions{ top: -72px; }
-}
-`;
+  }
