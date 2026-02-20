@@ -19,15 +19,15 @@ import {
 
 /* =========================================================
    app/page.js — SINGLE FILE (RUNNABLE)
-   - JSON DSL(GAME_DB) 기반 VN + 재판 엔진
-   - talk / scene / anim / trial(=cross_exam)
-   - Press → evolveOnPress (증언 갱신)
-   - Evidence Present (약점 문장에 제시)
-   - Evidence Examine (hotspots)
-   - Evidence Combine (req 2개 → result)
-   - Save/Load 3 slots (localStorage)
-   - UI: safe-area, 가림/끊김 최소화
-   - Error Overlay: console 없이도 화면에서 런타임 오류 확인 가능
+   FIXES:
+   - ✅ "클릭만 해도 계속 넘어감" 방지:
+     - 대화 박스 전체 클릭 제거
+     - 오른쪽 아래 "다음" 버튼만 진행
+     - 버튼 연타 디바운스(250ms)
+   - ✅ 역전재판 느낌: 심문 시작 탭 + 초록색 텍스트/라벨
+   - ✅ 말투: 마침표 남발 제거 + 한국어 종결 보정(자연스러운 마무리)
+   - ✅ Press → evolveOnPress / Evidence Examine(hotspot) / Combine / SaveLoad
+   - ✅ 런타임 에러 오버레이 포함
 ========================================================= */
 
 /* =========================
@@ -41,12 +41,16 @@ html,body{height:100%}
 .safe-top{padding-top:env(safe-area-inset-top)}
 .safe-bottom{padding-bottom:env(safe-area-inset-bottom)}
 .no-scrollbar::-webkit-scrollbar{width:0;height:0}
+
 @keyframes shake{0%,100%{transform:translate(0)}25%{transform:translate(-6px,3px)}75%{transform:translate(6px,-3px)}}
 .animate-shake{animation:shake .22s ease-in-out 3}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 .animate-fade-in{animation:fadeIn .25s ease-out}
 @keyframes slideUp{from{transform:translateY(18px);opacity:0}to{transform:translateY(0);opacity:1}}
 .animate-slide-up{animation:slideUp .28s cubic-bezier(.16,1,.3,1)}
+
+@keyframes neonPulse{0%,100%{opacity:.7;transform:translateY(0)}50%{opacity:1;transform:translateY(-1px)}}
+.neon-pulse{animation:neonPulse 1.25s ease-in-out infinite}
 `;
 
 /* =========================
@@ -56,12 +60,57 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
 const uid = (p = 'id') => `${p}_${Math.random().toString(36).slice(2, 10)}_${Date.now().toString(36)}`;
 
-function ensureSentence(text) {
-  const s = String(text ?? '').trim();
-  if (!s) return s;
-  const last = s[s.length - 1];
-  const has = last === '.' || last === '!' || last === '?' || last === '…';
-  return has ? s : s + '.';
+function nowMs() {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now();
+}
+
+function normalizeKoreanEnding(raw) {
+  // ✅ "기계적 마침표" 제거: 문장 끝 '.' 강제 X
+  // ✅ 이미 종결부호가 있으면 유지
+  // ✅ 종결부호가 없다면 한국어 어미 기반으로 자연스럽게 마무리(너무 과장 안 함)
+  const s0 = String(raw ?? '').trim();
+  if (!s0) return s0;
+
+  // 이미 종결 부호가 있으면 그대로
+  const last = s0[s0.length - 1];
+  if (['.', '!', '?', '…'].includes(last)) return s0;
+
+  // 괄호/인용으로 끝나면 그대로
+  if (last === ')' || last === ']' || last === '"' || last === "'") return s0;
+
+  // 한국어 종결 어미로 끝나는지(대략)
+  const end2 = s0.slice(-2);
+  const end3 = s0.slice(-3);
+
+  const endsLikeStatement =
+    s0.endsWith('다') ||
+    s0.endsWith('요') ||
+    s0.endsWith('죠') ||
+    s0.endsWith('네') ||
+    s0.endsWith('임') ||
+    s0.endsWith('함') ||
+    s0.endsWith('지') ||
+    s0.endsWith('래') ||
+    s0.endsWith('냐') ||
+    s0.endsWith('까') ||
+    s0.endsWith('라') ||
+    s0.endsWith('자') ||
+    end2 === '다.' ||
+    end2 === '요.' ||
+    end2 === '죠.' ||
+    end2 === '네.' ||
+    end2 === '까.' ||
+    end2 === '냐.' ||
+    end3 === '습니다';
+
+  if (endsLikeStatement) return s0;
+
+  // 영어/숫자/코드 느낌이면 마침표 하나만
+  const hasHangul = /[가-힣]/.test(s0);
+  if (!hasHangul) return s0 + '.';
+
+  // 기본: 짧게 마무리
+  return s0 + '…';
 }
 
 /* =========================
@@ -105,7 +154,7 @@ function lsDelete(slot) {
 }
 
 /* =========================
-   3) Asset Audio (optional)
+   3) Audio (optional assets)
 ========================= */
 function makeAudio(url, { loop = false, volume = 1 } = {}) {
   const a = new Audio(url);
@@ -138,7 +187,6 @@ async function fadeTo(audio, targetVol, ms) {
 function useAudioBus() {
   const unlockedRef = useRef(false);
   const mutedRef = useRef(false);
-
   const bgmCurRef = useRef({ key: null, audio: null, cache: new Map() });
   const sfxPoolRef = useRef(new Map());
 
@@ -242,14 +290,11 @@ function preloadImage(url) {
 }
 
 /* =========================
-   5) GAME_DB (Episode 1 + Trial 1 script)
+   5) GAME_DB (short playable)
+   - 실제 엔진 적용용: evolveOnPress / combination / examine 포함
 ========================= */
 const GAME_DB = {
-  meta: {
-    title: '에피소드 1: 단선된 진실 (The Severed Truth)',
-    description:
-      '90년대 장기 미제 유괴·협박 사건의 목소리 트릭과 알리바이 조작 요소를, 스마트 시티 인프라(도어락 로그·스마트워치·CCTV 프레임 드롭·AI 음성 분류·전력 데이터)로 재해석한 가상의 사건. 흑막은 직접 언급되지 않고 입막음 방식과 조작 흔적만 남긴다.',
-  },
+  meta: { title: '에피소드 1: 단선된 진실', description: '스마트 시티 인프라를 악용한 사건. 흑막은 직접 말하지 않고 흔적만 남긴다.' },
   backgrounds: {
     court: 'bg-gradient-to-b from-slate-950 via-slate-900 to-black',
     hall: 'bg-gradient-to-b from-slate-900 to-slate-800',
@@ -260,8 +305,8 @@ const GAME_DB = {
   },
   characters: {
     judge: { name: '마판사', color: '#6B7280' },
-    player: { name: '진무연', color: '#2563EB', desc: '말버릇: 선이 연결됐어.' },
-    prosecutor: { name: '류시온', color: '#DC2626', desc: '말버릇: 오차율 0%입니다.' },
+    player: { name: '진무연', color: '#2563EB' },
+    prosecutor: { name: '류시온', color: '#DC2626' },
     witness1: {
       name: '박경비',
       color: '#10B981',
@@ -314,15 +359,7 @@ const GAME_DB = {
         bg: 'bg-slate-800 text-gray-200',
         content: '[압수품]\n금속 부품.\n끝부분 변색이 이상하다.',
         hotspots: [
-          {
-            id: 'burn_mark',
-            x: 78,
-            y: 38,
-            width: 16,
-            height: 22,
-            resultEvidenceKey: 'electric_burn',
-            successMsg: '탄 자국이다. 스파크 흔적.',
-          },
+          { id: 'burn_mark', x: 78, y: 38, width: 16, height: 22, resultEvidenceKey: 'electric_burn', successMsg: '탄 자국이다. 스파크 흔적.' },
         ],
       },
     },
@@ -343,9 +380,12 @@ const GAME_DB = {
       initialEvidence: ['autopsy', 'smartwatch_data', 'server_log', 'server_blade', 'voice_print', 'power_spike', 'hall_cctv'],
       script: [
         { type: 'scene', bgKey: 'court', bgmKey: 'trial' },
-        { type: 'talk', charKey: 'judge', text: '개정합니다. 핵심만.' },
-        { type: 'talk', charKey: 'prosecutor', text: '오차율 0%입니다. 21:00. 밀실. 둔기 타격.' },
-        { type: 'talk', charKey: 'player', text: '선이 엉켰네요. 풀어보죠.' },
+
+        { type: 'talk', charKey: 'judge', text: '개정합니다. 핵심만' },
+        { type: 'talk', charKey: 'prosecutor', text: '오차율 0%입니다. 21:00. 밀실. 둔기 타격' },
+        { type: 'talk', charKey: 'player', text: '선이 엉켰네요. 풀어보죠' },
+
+        { type: 'anim', name: 'cross_start' },
 
         {
           type: 'trial',
@@ -353,28 +393,30 @@ const GAME_DB = {
           witnessCharKey: 'witness1',
           bgKey: 'hall',
           statements: [
-            { id: 'w1_01', text: '21:00 정각, 누가 서버실 쪽에서 튀어나왔슈.' },
+            { id: 'w1_01', text: '21:00 정각, 누가 서버실 쪽에서 튀어나왔슈' },
             {
               id: 'w1_02',
-              text: '문이 열려 있었슈. 그래서 나왔다고 확신했슈.',
-              pressQ: '문이 열렸다고요?',
+              text: '문이 열려 있었슈. 그래서 나왔다고 확신했슈',
+              pressQ: '문이 열렸다고요',
               press: [
-                { charKey: 'player', text: '도어락 로그는 봤어요?' },
-                { charKey: 'witness1', face: 'sweat', text: '그건… 나중에… 들었슈.' },
+                { charKey: 'player', text: '도어락 로그는 봤어요' },
+                { charKey: 'witness1', face: 'sweat', text: '그건… 나중에… 들었슈' },
               ],
               evolveOnPress: {
-                newText: '문이 열렸다고 생각했슈. 나중에 로그가 잠겼다고 해서… 헷갈렸슈.',
+                newText: '문이 열렸다고 생각했슈. 나중에 로그가 잠겼다고 해서 헷갈렸슈',
                 weakness: true,
                 contradictionEvidenceKey: 'server_log',
-                failMsg: '도어락 로그를 봐라.',
+                failMsg: '도어락 로그를 봐라',
               },
             },
           ],
         },
 
         { type: 'anim', name: 'objection' },
-        { type: 'talk', charKey: 'player', text: '이의 있습니다. 20:55부터 21:05까지 문은 열린 적이 없습니다.' },
-        { type: 'talk', charKey: 'prosecutor', text: '시간 착각이죠. 잠복하면 됩니다.' },
+        { type: 'talk', charKey: 'player', text: '이의 있습니다. 20:55부터 21:05까지 문은 열린 적이 없습니다' },
+        { type: 'talk', charKey: 'prosecutor', text: '시간 착각이죠. 잠복하면 됩니다' },
+
+        { type: 'anim', name: 'cross_start' },
 
         {
           type: 'trial',
@@ -384,17 +426,18 @@ const GAME_DB = {
           statements: [
             {
               id: 'p_01',
-              text: '사망 추정 시각은 21:00입니다.',
+              text: '사망 추정 시각은 21:00입니다',
               weakness: true,
               contradictionEvidenceKey: 'real_time_of_death',
-              failMsg: '부검+워치를 조합해라.',
+              failMsg: '부검+워치를 조합해라',
             },
           ],
         },
 
         { type: 'anim', name: 'objection' },
-        { type: 'talk', charKey: 'player', text: '선이 연결됐어. 심정지는 20:45입니다.' },
-        { type: 'talk', charKey: 'prosecutor', text: '…뭐죠, 그건.' },
+        { type: 'talk', charKey: 'player', text: '선이 연결됐어. 심정지는 20:45입니다' },
+
+        { type: 'anim', name: 'cross_start' },
 
         {
           type: 'trial',
@@ -404,23 +447,25 @@ const GAME_DB = {
           statements: [
             {
               id: 'w2_01',
-              text: '블레이드가 흉기입니다. 피가 증거예요.',
-              pressQ: '피가 곧 살인?',
+              text: '블레이드가 흉기입니다. 피가 증거예요',
+              pressQ: '피가 곧 살인인가요',
               press: [
-                { charKey: 'player', text: '끝부분 변색은 봤나요?' },
-                { charKey: 'witness2', face: 'sweat', text: '그건… 중요하지 않죠.' },
+                { charKey: 'player', text: '끝부분 변색은 봤나요' },
+                { charKey: 'witness2', face: 'sweat', text: '그건 중요하지 않죠' },
               ],
               evolveOnPress: {
-                newText: '피가 묻은 흉기면 끝이에요.',
+                newText: '피가 묻은 흉기면 끝이에요',
                 weakness: true,
                 contradictionEvidenceKey: 'staged_accident',
-                failMsg: '탄 자국+진짜 사망 시각을 조합해라.',
+                failMsg: '탄 자국+진짜 사망 시각을 조합해라',
               },
             },
           ],
         },
 
-        { type: 'talk', charKey: 'player', text: '이 사건의 본질은 살인이 아닙니다. 감전사입니다.' },
+        { type: 'talk', charKey: 'player', text: '이 사건의 본질은 살인이 아닙니다. 감전사입니다' },
+
+        { type: 'anim', name: 'cross_start' },
 
         {
           type: 'trial',
@@ -430,26 +475,25 @@ const GAME_DB = {
           statements: [
             {
               id: 'w3_01',
-              text: "20:59 인터폰. 윤비서 음성으로 분류됐죠.",
-              pressQ: '윤비서는 20:45에 죽었다.',
+              text: '20:59 인터폰. 윤비서 음성으로 분류됐죠',
+              pressQ: '윤비서는 20:45에 죽었어요',
               press: [
-                { charKey: 'player', text: '그럼 태깅이 틀렸을 수도.' },
-                { charKey: 'witness3', face: 'sweat', text: '프레임이 깨지면요.' },
+                { charKey: 'player', text: '그럼 태깅이 틀렸을 수도 있네요' },
+                { charKey: 'witness3', face: 'sweat', text: '프레임이 깨지면요' },
               ],
               evolveOnPress: {
-                newText: '프레임 드롭이면 태깅이 틀릴 수 있어요.',
+                newText: '프레임 드롭이면 태깅이 틀릴 수 있어요',
                 weakness: true,
                 contradictionEvidenceKey: 'evolved_voice_log',
-                failMsg: '음성+CCTV를 조합해라.',
+                failMsg: '음성+CCTV를 조합해라',
               },
             },
           ],
         },
 
-        { type: 'talk', charKey: 'judge', text: '무죄.' },
+        { type: 'talk', charKey: 'judge', text: '무죄' },
         { type: 'scene', bgKey: 'ending', bgmKey: 'victory' },
-        { type: 'talk', charKey: 'narrator', text: '최실장은 발신자 없는 무음 전화를 받았다.' },
-        { type: 'talk', charKey: 'player', text: '선이… 끊겼어.' },
+        { type: 'talk', charKey: 'player', text: '선이… 끊겼어' },
         { type: 'end', text: 'THE END' },
       ],
     },
@@ -471,7 +515,7 @@ function compileGame(db) {
       lines.push({
         type: 'talk',
         charKey: raw.charKey || 'narrator',
-        text: ensureSentence(raw.text),
+        text: normalizeKoreanEnding(raw.text),
         face: raw.face || 'normal',
         bgKey: raw.bgKey || null,
       });
@@ -496,26 +540,26 @@ function compileGame(db) {
     if (raw.type === 'trial') {
       const statements = (raw.statements || []).map((s) => ({
         id: s.id || uid('stmt'),
-        text: ensureSentence(s.text),
-        pressQ: s.pressQ ? ensureSentence(s.pressQ) : null,
+        text: normalizeKoreanEnding(s.text),
+        pressQ: s.pressQ ? normalizeKoreanEnding(s.pressQ) : null,
         press: Array.isArray(s.press)
           ? s.press.map((p) => ({
               charKey: p.charKey || 'narrator',
               face: p.face || 'normal',
-              text: ensureSentence(p.text),
+              text: normalizeKoreanEnding(p.text),
             }))
           : [],
         evolveOnPress: s.evolveOnPress
           ? {
-              newText: ensureSentence(s.evolveOnPress.newText),
+              newText: normalizeKoreanEnding(s.evolveOnPress.newText),
               weakness: !!s.evolveOnPress.weakness,
               contradictionEvidenceKey: s.evolveOnPress.contradictionEvidenceKey || null,
-              failMsg: s.evolveOnPress.failMsg ? ensureSentence(s.evolveOnPress.failMsg) : null,
+              failMsg: s.evolveOnPress.failMsg ? normalizeKoreanEnding(s.evolveOnPress.failMsg) : null,
             }
           : null,
         weakness: !!s.weakness,
         contradictionEvidenceKey: s.contradictionEvidenceKey || null,
-        failMsg: s.failMsg ? ensureSentence(s.failMsg) : null,
+        failMsg: s.failMsg ? normalizeKoreanEnding(s.failMsg) : null,
       }));
 
       lines.push({
@@ -554,13 +598,6 @@ const AT = {
   PRESENT: 'PRESENT',
   OPEN_EVIDENCE: 'OPEN_EVIDENCE',
   CLOSE_EVIDENCE: 'CLOSE_EVIDENCE',
-  OPEN_COMBINE: 'OPEN_COMBINE',
-  CLOSE_COMBINE: 'CLOSE_COMBINE',
-  OPEN_EXAMINE: 'OPEN_EXAMINE',
-  CLOSE_EXAMINE: 'CLOSE_EXAMINE',
-  SELECT_COMBINE_A: 'SELECT_COMBINE_A',
-  SELECT_COMBINE_B: 'SELECT_COMBINE_B',
-  APPLY_COMBINE: 'APPLY_COMBINE',
   HYDRATE: 'HYDRATE',
 };
 
@@ -575,11 +612,6 @@ function initialState(game) {
     pressMode: false,
     pressIndex: 0,
     evidenceOpen: false,
-    combineOpen: false,
-    examineOpen: false,
-    examineKey: null,
-    combineA: null,
-    combineB: null,
     evolved: {},
     ending: false,
     gameOver: false,
@@ -609,40 +641,6 @@ function reducer(game, state, action) {
       return { ...state, evidenceOpen: true };
     case AT.CLOSE_EVIDENCE:
       return { ...state, evidenceOpen: false };
-
-    case AT.OPEN_COMBINE:
-      return { ...state, combineOpen: true };
-    case AT.CLOSE_COMBINE:
-      return { ...state, combineOpen: false, combineA: null, combineB: null };
-
-    case AT.OPEN_EXAMINE:
-      return { ...state, examineOpen: true, examineKey: action.key || null };
-    case AT.CLOSE_EXAMINE:
-      return { ...state, examineOpen: false, examineKey: null };
-
-    case AT.SELECT_COMBINE_A:
-      return { ...state, combineA: action.key || null };
-    case AT.SELECT_COMBINE_B:
-      return { ...state, combineB: action.key || null };
-
-    case AT.APPLY_COMBINE: {
-      const a = state.combineA;
-      const b = state.combineB;
-      if (!a || !b) return { ...state, combineOpen: false, combineA: null, combineB: null };
-      const req = [a, b].sort().join('::');
-
-      const hit = (game.combinations || []).find((c) => {
-        const rr = (c.req || []).slice().sort().join('::');
-        return rr === req;
-      });
-
-      if (!hit) return { ...state, combineOpen: false, combineA: null, combineB: null };
-
-      const inv = new Set(state.inv);
-      inv.add(hit.result);
-
-      return { ...state, inv: Array.from(inv), combineOpen: false, combineA: null, combineB: null };
-    }
 
     case AT.PRESS: {
       if (!line || line.type !== 'cross_exam') return state;
@@ -696,6 +694,7 @@ function reducer(game, state, action) {
 
     case AT.NEXT: {
       if (state.ending || state.gameOver) return state;
+
       if (state.pressMode) return reducer(game, state, { type: AT.PRESS_NEXT });
 
       if (!line) return state;
@@ -715,6 +714,7 @@ function reducer(game, state, action) {
           const nextLine = lines[nextIdx];
           return { ...state, idx: nextIdx, bgKey: nextLine?.bgKey || state.bgKey, ceIndex: 0 };
         }
+
         const last = state.ceIndex >= total - 1;
         if (last) {
           const weakIdx = (line.statements || [])
@@ -724,11 +724,14 @@ function reducer(game, state, action) {
               return { st: merged, i };
             })
             .filter(({ st }) => !!st.weakness);
+
           if (weakIdx.length > 0) return { ...state, ceIndex: weakIdx[0].i };
+
           const nextIdx = clamp(state.idx + 1, 0, lines.length - 1);
           const nextLine = lines[nextIdx];
           return { ...state, idx: nextIdx, bgKey: nextLine?.bgKey || state.bgKey, ceIndex: 0 };
         }
+
         return { ...state, ceIndex: state.ceIndex + 1 };
       }
 
@@ -772,7 +775,7 @@ function deriveView(game, state) {
     return 'narrator';
   })();
 
-  const speaker = chars[speakerKey] || chars.narrator;
+  const speaker = chars[speakerKey] || chars.judge;
   const face = pressItem?.face || (line?.type === 'talk' ? line.face : 'normal');
 
   const text = (() => {
@@ -808,7 +811,15 @@ function deriveView(game, state) {
 }
 
 /* =========================
-   9) UI Components
+   9) Evidence combine / examine helpers
+========================= */
+function findCombination(combos, a, b) {
+  const req = [a, b].sort().join('::');
+  return (combos || []).find((c) => (c.req || []).slice().sort().join('::') === req) || null;
+}
+
+/* =========================
+   10) UI Components
 ========================= */
 function Pill({ children }) {
   return <div className="px-4 py-2 rounded-full border border-white/10 bg-black/45 backdrop-blur-md">{children}</div>;
@@ -839,18 +850,7 @@ function ModalShell({ open, onClose, title, icon, children, footer }) {
   );
 }
 
-function EvidenceModal({
-  open,
-  onClose,
-  inventory,
-  evidenceMap,
-  admittedSet,
-  onPresent,
-  onExamine,
-  onOpenCombine,
-  onOpenAdmission,
-  hint,
-}) {
+function EvidenceModal({ open, onClose, inventory, evidenceMap, onPresent, onExamine, onOpenCombine, hint }) {
   return (
     <ModalShell
       open={open}
@@ -863,10 +863,10 @@ function EvidenceModal({
             {hint || ''}
           </div>
           <div className="flex gap-2">
-            <button onClick={onOpenCombine} className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold" style={{ fontFamily: 'Inter, sans-serif' }}>
+            <button onClick={onOpenCombine} className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold">
               조합
             </button>
-            <button onClick={onClose} className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold" style={{ fontFamily: 'Inter, sans-serif' }}>
+            <button onClick={onClose} className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold">
               닫기
             </button>
           </div>
@@ -877,42 +877,28 @@ function EvidenceModal({
         {inventory.map((key) => {
           const ev = evidenceMap[key];
           if (!ev) return null;
-          const admitted = admittedSet.has(key);
           return (
             <div key={key} className="rounded-2xl border border-white/10 bg-white/5 p-4">
               <div className="flex items-start gap-4">
                 <div className="text-4xl">{ev.icon || '🗂️'}</div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <div className="text-base font-semibold text-white" style={{ fontFamily: 'Inter, sans-serif' }}>
-                      {ev.name}
-                    </div>
-                    <span className={`text-xs px-2 py-1 rounded-full border ${admitted ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200' : 'border-white/10 bg-black/20 text-gray-200'}`}>
-                      {admitted ? '채택' : '미채택'}
-                    </span>
-                    <span className="text-xs font-mono px-2 py-1 rounded-full bg-black/30 border border-white/10 text-gray-300">
-                      {key}
-                    </span>
+                    <div className="text-base font-semibold text-white">{ev.name}</div>
+                    <span className="text-xs font-mono px-2 py-1 rounded-full bg-black/30 border border-white/10 text-gray-300">{key}</span>
                   </div>
-                  <div className="mt-2 text-sm text-gray-300 leading-relaxed" style={{ fontFamily: 'Inter, sans-serif' }}>
-                    {ev.desc}
-                  </div>
+                  <div className="mt-2 text-sm text-gray-300 leading-relaxed">{ev.desc}</div>
                 </div>
               </div>
 
               <div className="mt-4 flex flex-wrap gap-2 justify-end">
                 {ev.examine ? (
-                  <button onClick={() => onExamine(key)} className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 font-semibold" style={{ fontFamily: 'Inter, sans-serif' }}>
+                  <button onClick={() => onExamine(key)} className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 font-semibold">
                     조사
                   </button>
                 ) : null}
-                <button onClick={() => onOpenAdmission(key)} className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 font-semibold" style={{ fontFamily: 'Inter, sans-serif' }}>
-                  채택
-                </button>
                 <button
                   onClick={() => onPresent(key)}
                   className="px-4 py-2 rounded-xl bg-amber-600/80 hover:bg-amber-500 border border-amber-400/30 font-semibold"
-                  style={{ fontFamily: 'Inter, sans-serif' }}
                 >
                   제시
                 </button>
@@ -934,14 +920,12 @@ function CombineModal({ open, onClose, inventory, evidenceMap, a, b, onPickA, on
       icon={<RotateCcw className="w-5 h-5 text-gray-200" />}
       footer={
         <div className="flex items-center justify-between gap-3">
-          <div className="text-xs text-gray-400" style={{ fontFamily: 'Inter, sans-serif' }}>
-            두 개를 골라 조합하라.
-          </div>
+          <div className="text-xs text-gray-400">두 개를 골라 조합</div>
           <div className="flex gap-2">
-            <button onClick={onApply} className="px-4 py-2 rounded-xl bg-emerald-600/80 hover:bg-emerald-500 border border-emerald-400/30 font-semibold" style={{ fontFamily: 'Inter, sans-serif' }}>
+            <button onClick={onApply} className="px-4 py-2 rounded-xl bg-emerald-600/80 hover:bg-emerald-500 border border-emerald-400/30 font-semibold">
               조합
             </button>
-            <button onClick={onClose} className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold" style={{ fontFamily: 'Inter, sans-serif' }}>
+            <button onClick={onClose} className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold">
               닫기
             </button>
           </div>
@@ -949,12 +933,10 @@ function CombineModal({ open, onClose, inventory, evidenceMap, a, b, onPickA, on
       }
     >
       <div className="rounded-2xl border border-white/10 bg-white/5 p-4 mb-4">
-        <div className="flex flex-wrap items-center gap-2 text-sm" style={{ fontFamily: 'Inter, sans-serif' }}>
-          <span className="text-gray-300">A:</span>
-          <span className="text-white font-semibold">{a ? evidenceMap[a]?.name || a : '선택'}</span>
-          <span className="text-gray-400">·</span>
-          <span className="text-gray-300">B:</span>
-          <span className="text-white font-semibold">{b ? evidenceMap[b]?.name || b : '선택'}</span>
+        <div className="text-sm text-gray-200">
+          A: <span className="font-semibold text-white">{a ? (evidenceMap[a]?.name || a) : '선택'}</span>
+          <span className="mx-2 text-gray-500">·</span>
+          B: <span className="font-semibold text-white">{b ? (evidenceMap[b]?.name || b) : '선택'}</span>
         </div>
       </div>
 
@@ -971,17 +953,15 @@ function CombineModal({ open, onClose, inventory, evidenceMap, a, b, onPickA, on
                 else if (!b || b === key) onPickB(key);
                 else onPickB(key);
               }}
-              className={`p-4 rounded-2xl border text-left transition ${selected ? 'bg-amber-500/10 border-amber-400/30' : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'}`}
+              className={`p-4 rounded-2xl border text-left transition ${
+                selected ? 'bg-emerald-500/10 border-emerald-400/30' : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
+              }`}
             >
               <div className="flex items-start gap-3">
                 <div className="text-3xl">{ev.icon || '🗂️'}</div>
                 <div className="min-w-0">
-                  <div className="text-sm font-semibold text-white" style={{ fontFamily: 'Inter, sans-serif' }}>
-                    {ev.name}
-                  </div>
-                  <div className="text-xs text-gray-400 mt-1" style={{ fontFamily: 'Inter, sans-serif' }}>
-                    {ev.desc}
-                  </div>
+                  <div className="text-sm font-semibold text-white">{ev.name}</div>
+                  <div className="text-xs text-gray-400 mt-1">{ev.desc}</div>
                 </div>
               </div>
             </button>
@@ -1004,99 +984,29 @@ function ExamineModal({ open, onClose, evidenceKey, evidence, onFound }) {
       icon={<Search className="w-5 h-5 text-gray-200" />}
       footer={
         <div className="flex items-center justify-end">
-          <button onClick={onClose} className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold" style={{ fontFamily: 'Inter, sans-serif' }}>
+          <button onClick={onClose} className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold">
             닫기
           </button>
         </div>
       }
     >
       <div className={`rounded-2xl border border-white/10 p-4 ${ex.bg || 'bg-white/5 text-gray-200'}`}>
-        <pre className="whitespace-pre-wrap text-sm leading-relaxed" style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace' }}>
-          {ex.content}
-        </pre>
+        <pre className="whitespace-pre-wrap text-sm leading-relaxed font-mono">{ex.content}</pre>
 
         <div className="relative mt-4 w-full aspect-[16/9] rounded-2xl border border-white/10 bg-black/30 overflow-hidden">
           {hotspots.map((h) => (
             <button
               key={h.id}
               onClick={() => onFound(h)}
-              className="absolute border border-amber-400/40 bg-amber-500/10 hover:bg-amber-500/20 rounded-xl transition"
-              style={{
-                left: `${h.x}%`,
-                top: `${h.y}%`,
-                width: `${h.width}%`,
-                height: `${h.height}%`,
-              }}
+              className="absolute border border-emerald-400/40 bg-emerald-500/10 hover:bg-emerald-500/20 rounded-xl transition"
+              style={{ left: `${h.x}%`, top: `${h.y}%`, width: `${h.width}%`, height: `${h.height}%` }}
               aria-label={h.id}
             />
           ))}
           <div className="absolute inset-0 pointer-events-none bg-gradient-to-t from-black/40 to-transparent" />
-          <div className="absolute bottom-3 left-3 text-xs text-gray-300" style={{ fontFamily: 'Inter, sans-serif' }}>
-            핫스팟을 눌러 단서를 찾아라.
-          </div>
+          <div className="absolute bottom-3 left-3 text-xs text-gray-300">초록 핫스팟을 눌러 단서를 찾아라</div>
         </div>
       </div>
-    </ModalShell>
-  );
-}
-
-function AdmissionModal({ open, onClose, evidenceKey, evidence, admission, onOffer, onAdmit, onDeny }) {
-  if (!open || !evidenceKey) return null;
-  const admitted = admission.admitted.has(evidenceKey);
-  const denied = admission.denied.has(evidenceKey);
-  const pending = Array.from(admission.pending.values()).find((r) => r.evidenceKey === evidenceKey) || null;
-
-  return (
-    <ModalShell
-      open={open}
-      onClose={onClose}
-      title="증거 채택"
-      icon={<ShieldAlert className="w-5 h-5 text-amber-300" />}
-      footer={
-        <div className="flex items-center justify-end gap-2">
-          <button onClick={onClose} className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold" style={{ fontFamily: 'Inter, sans-serif' }}>
-            닫기
-          </button>
-        </div>
-      }
-    >
-      <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-        <div className="flex items-start gap-4">
-          <div className="text-4xl">{evidence?.icon || '🗂️'}</div>
-          <div className="min-w-0">
-            <div className="text-lg font-semibold text-white" style={{ fontFamily: 'Inter, sans-serif' }}>
-              {evidence?.name || evidenceKey}
-              <span className="ml-2 text-xs font-mono text-gray-400">{evidenceKey}</span>
-            </div>
-            <div className="mt-2 text-sm text-gray-300" style={{ fontFamily: 'Inter, sans-serif' }}>
-              {evidence?.desc || ''}
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2 text-xs" style={{ fontFamily: 'Inter, sans-serif' }}>
-              <span className={`px-2 py-1 rounded-full border ${admitted ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200' : denied ? 'border-rose-400/30 bg-rose-500/10 text-rose-200' : pending ? 'border-amber-400/30 bg-amber-500/10 text-amber-200' : 'border-white/10 bg-black/20 text-gray-200'}`}>
-                {admitted ? '채택됨' : denied ? '기각됨' : pending ? '심리중' : '미신청'}
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        <button onClick={onOffer} disabled={!!pending || admitted || denied} className="px-4 py-2 rounded-xl bg-blue-600/80 hover:bg-blue-500 border border-blue-400/30 font-semibold disabled:opacity-40">
-          신청
-        </button>
-        <button onClick={onAdmit} disabled={!pending} className="px-4 py-2 rounded-xl bg-emerald-600/80 hover:bg-emerald-500 border border-emerald-400/30 font-semibold disabled:opacity-40">
-          채택
-        </button>
-        <button onClick={onDeny} disabled={!pending} className="px-4 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-500 border border-rose-400/30 font-semibold disabled:opacity-40">
-          기각
-        </button>
-      </div>
-
-      {denied ? (
-        <div className="mt-4 text-sm text-rose-200 bg-rose-500/10 border border-rose-400/20 rounded-2xl p-4">
-          기각 사유: {admission.denied.get(evidenceKey)?.rationale || 'denied'}
-        </div>
-      ) : null}
     </ModalShell>
   );
 }
@@ -1166,12 +1076,12 @@ function SaveLoadModal({ open, onClose, onSave, onLoad, onDelete }) {
 }
 
 /* =========================
-   10) Page
+   11) Page
 ========================= */
 export default function Page() {
   const audio = useAudioBus();
 
-  // ✅ runtime error overlay (console 없이 확인)
+  // runtime error overlay
   const [runtimeErr, setRuntimeErr] = useState(null);
   useEffect(() => {
     const onError = (event) => {
@@ -1207,17 +1117,9 @@ export default function Page() {
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [combineOpen, setCombineOpen] = useState(false);
   const [examineOpen, setExamineOpen] = useState(false);
-  const [admissionOpen, setAdmissionOpen] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
 
   const [examineKey, setExamineKey] = useState(null);
-  const [admissionKey, setAdmissionKey] = useState(null);
-
-  const [admission, setAdmission] = useState(() => {
-    const a = { admitted: new Set(), denied: new Map(), pending: new Map() };
-    for (const k of game.initialEvidence || []) a.admitted.add(k);
-    return a;
-  });
 
   const [combineA, setCombineA] = useState(null);
   const [combineB, setCombineB] = useState(null);
@@ -1226,6 +1128,15 @@ export default function Page() {
   const doFlash = (ms = 140) => (setFlash(true), setTimeout(() => setFlash(false), ms));
   const doOverlay = (t, ms = 1000) => (setOverlayMsg(t), setTimeout(() => setOverlayMsg(null), ms));
   const doEffect = (t, ms = 850) => (setEffectText(t), setTimeout(() => setEffectText(null), ms));
+
+  // ✅ next button debounce
+  const lastNextRef = useRef(0);
+  const canNext = () => {
+    const t = nowMs();
+    if (t - lastNextRef.current < 250) return false;
+    lastNextRef.current = t;
+    return true;
+  };
 
   // optional bg image
   useEffect(() => {
@@ -1262,18 +1173,21 @@ export default function Page() {
   // anim effect + auto-advance
   useEffect(() => {
     if (view.line?.type !== 'anim') return;
+
     if (view.line.name === 'objection') {
       doEffect('OBJECTION!');
       doFlash();
       sfx('objection');
+    } else if (view.line.name === 'cross_start') {
+      doOverlay('CROSS EXAMINATION');
+      sfx('tap');
     } else {
       doFlash();
       sfx('flash');
     }
+
     dispatch({ type: AT.NEXT });
   }, [view.line?.type]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const admittedSet = admission.admitted instanceof Set ? admission.admitted : new Set();
 
   const doPresent = async (key) => {
     await unlock();
@@ -1286,11 +1200,11 @@ export default function Page() {
     setTimeout(async () => {
       if (state.hp < prevHp) {
         doShake();
-        doOverlay('틀렸다.');
+        doOverlay('틀렸다');
         await sfx('fail');
       } else {
         doEffect('OBJECTION!');
-        doOverlay('모순이다.');
+        doOverlay('모순이다');
         await sfx('objection');
       }
     }, 80);
@@ -1300,14 +1214,24 @@ export default function Page() {
     const a = combineA;
     const b = combineB;
     if (!a || !b) {
-      doOverlay('두 개를 골라라.');
+      doOverlay('두 개를 골라라');
       return;
     }
-    dispatch({ type: AT.APPLY_COMBINE });
+    const hit = findCombination(game.combinations, a, b);
     setCombineOpen(false);
     setCombineA(null);
     setCombineB(null);
-    doOverlay('조합 결과를 확인하라.');
+
+    if (!hit) {
+      doOverlay('아무 일도 없다');
+      return;
+    }
+
+    if (!state.inv.includes(hit.result)) {
+      const inv = Array.from(new Set([...state.inv, hit.result]));
+      dispatch({ type: AT.HYDRATE, state: { ...state, inv } });
+    }
+    doOverlay(hit.successMsg || '새 단서');
     await sfx('admit');
   };
 
@@ -1318,71 +1242,25 @@ export default function Page() {
       const inv = Array.from(new Set([...state.inv, key]));
       dispatch({ type: AT.HYDRATE, state: { ...state, inv } });
     }
-    doOverlay(h.successMsg || '단서를 찾았다.');
+    doOverlay(h.successMsg || '단서');
     await sfx('admit');
   };
 
-  const openAdmission = (key) => {
-    setAdmissionKey(key);
-    setAdmissionOpen(true);
-  };
-
-  const offerAdmission = () => {
-    if (!admissionKey) return;
-    const res = requestAdmission(admission, admissionKey);
-    setAdmission(res.state);
-    doOverlay('신청했다.');
-  };
-
-  const admitEvidence = () => {
-    if (!admissionKey) return;
-    const req = Array.from(admission.pending.values()).find((r) => r.evidenceKey === admissionKey);
-    if (!req) return;
-    setAdmission((a) => ruleAdmission(a, req.requestId, 'ADMIT'));
-    doOverlay('채택됐다.');
-  };
-
-  const denyEvidence = () => {
-    if (!admissionKey) return;
-    const req = Array.from(admission.pending.values()).find((r) => r.evidenceKey === admissionKey);
-    if (!req) return;
-    setAdmission((a) => ruleAdmission(a, req.requestId, 'DENY'));
-    doOverlay('기각됐다.');
-  };
-
+  // save/load
   const onSave = async (slot) => {
-    const blob = {
-      schema: 1,
-      savedAt: new Date().toISOString(),
-      state,
-      admission: {
-        admitted: Array.from(admission.admitted.values()),
-        denied: Array.from(admission.denied.entries()),
-        pending: Array.from(admission.pending.entries()),
-      },
-      combine: { a: combineA, b: combineB },
-    };
+    const blob = { schema: 1, savedAt: new Date().toISOString(), state, combine: { a: combineA, b: combineB } };
     const res = lsSave(slot, blob);
     return { ok: res.ok, msg: res.ok ? `슬롯 ${slot} 저장 완료` : `저장 실패: ${res.reason}` };
   };
-
   const onLoad = async (slot) => {
     const res = lsLoad(slot);
     if (!res.ok) return { ok: false, msg: `로드 실패: ${res.reason}` };
     const data = res.data;
     if (data?.state) dispatch({ type: AT.HYDRATE, state: data.state });
-    if (data?.admission) {
-      setAdmission({
-        admitted: new Set(data.admission.admitted || []),
-        denied: new Map(data.admission.denied || []),
-        pending: new Map(data.admission.pending || []),
-      });
-    }
     setCombineA(data?.combine?.a || null);
     setCombineB(data?.combine?.b || null);
     return { ok: true, msg: `슬롯 ${slot} 로드 완료` };
   };
-
   const onDelete = async (slot) => {
     const res = lsDelete(slot);
     return { ok: res.ok, msg: res.ok ? `슬롯 ${slot} 삭제 완료` : `삭제 실패: ${res.reason}` };
@@ -1390,7 +1268,6 @@ export default function Page() {
 
   const bgStyle = bgUrl ? { backgroundImage: `url(${bgUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined;
 
-  // GAME OVER
   if (state.gameOver) {
     return (
       <div className={`min-h-screen ${GAME_DB.backgrounds.gameover} text-white flex items-center justify-center p-6`} style={bgStyle}>
@@ -1400,20 +1277,7 @@ export default function Page() {
           <div className="text-4xl font-bold mb-3" style={{ fontFamily: 'Crimson Pro, serif' }}>
             게임 오버
           </div>
-          <div className="text-gray-300 mb-8" style={{ fontFamily: 'Inter, sans-serif' }}>
-            페널티가 누적됐다.
-          </div>
-          <button
-            onClick={() => {
-              setAdmission(() => {
-                const a = { admitted: new Set(), denied: new Map(), pending: new Map() };
-                for (const k of game.initialEvidence || []) a.admitted.add(k);
-                return a;
-              });
-              dispatch({ type: AT.RESET });
-            }}
-            className="px-6 py-3 rounded-xl bg-white text-black font-semibold"
-          >
+          <button onClick={() => dispatch({ type: AT.RESET })} className="px-6 py-3 rounded-xl bg-white text-black font-semibold">
             다시 시작
           </button>
         </div>
@@ -1421,7 +1285,6 @@ export default function Page() {
     );
   }
 
-  // ENDING
   if (state.ending) {
     return (
       <div className={`min-h-screen ${GAME_DB.backgrounds.ending} text-white flex items-center justify-center p-6`} style={bgStyle}>
@@ -1430,9 +1293,6 @@ export default function Page() {
           <Scale className="w-20 h-20 mx-auto mb-5 text-blue-400" />
           <div className="text-5xl font-bold mb-3" style={{ fontFamily: 'Crimson Pro, serif' }}>
             {GAME_DB.meta.title}
-          </div>
-          <div className="text-gray-300 mb-8" style={{ fontFamily: 'Inter, sans-serif' }}>
-            {GAME_DB.meta.description}
           </div>
           <button onClick={() => dispatch({ type: AT.RESET })} className="px-6 py-3 rounded-xl bg-white text-black font-semibold">
             다시하기
@@ -1446,6 +1306,8 @@ export default function Page() {
   const avatar = view.avatar;
   const pressable = view.isCE && !!view.stmt?.pressQ && (view.stmt?.press?.length || 0) > 0;
   const weakNow = !!view.stmt?.weakness;
+
+  const hint = view.hint;
 
   return (
     <div className={`h-screen w-full relative overflow-hidden ${view.bgClass} ${shake ? 'animate-shake' : ''}`} style={bgStyle}>
@@ -1462,25 +1324,10 @@ export default function Page() {
             <pre className="text-xs whitespace-pre-wrap bg-white/5 border border-white/10 rounded-xl p-3">
 {runtimeErr.stack || '(no stack)'}
             </pre>
-            <div className="mt-4 flex gap-2">
-              <button className="px-4 py-2 rounded-xl bg-white text-black font-semibold" onClick={() => setRuntimeErr(null)}>
-                닫기
-              </button>
-              <button
-                className="px-4 py-2 rounded-xl bg-white/10 border border-white/10 font-semibold"
-                onClick={async () => {
-                  const text = `${runtimeErr.type}: ${runtimeErr.msg}\n\n${runtimeErr.stack || ''}`;
-                  try { await navigator.clipboard.writeText(text); } catch {}
-                }}
-              >
-                복사
-              </button>
-            </div>
           </div>
         </div>
       ) : null}
 
-      {/* overlay */}
       <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-black/10 pointer-events-none" />
 
       {/* HUD */}
@@ -1542,12 +1389,15 @@ export default function Page() {
           </div>
         </div>
 
+        {/* ✅ Cross tab (green) */}
         {view.isCE ? (
           <div className="px-4 mt-3">
-            <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full border backdrop-blur-md ${'bg-blue-950/70 border-blue-500/40 text-blue-200'}`}>
-              <AlertCircle className="w-4 h-4" />
-              <span className="text-xs font-semibold" style={{ fontFamily: 'Inter, sans-serif' }}>
-                {view.ceTitle} · {view.ceIndex + 1}/{view.ceTotal} {weakNow ? '· 약점' : ''}
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-emerald-400/40 bg-emerald-500/10 text-emerald-200 backdrop-blur-md neon-pulse">
+              <span className="text-[11px] font-black tracking-widest" style={{ fontFamily: 'Inter, sans-serif' }}>
+                CROSS EXAMINATION
+              </span>
+              <span className="text-[11px] font-semibold" style={{ fontFamily: 'Inter, sans-serif' }}>
+                · {view.ceTitle} · {view.ceIndex + 1}/{view.ceTotal} {weakNow ? '· WEAK' : ''}
               </span>
             </div>
           </div>
@@ -1605,22 +1455,18 @@ export default function Page() {
               </div>
             ) : null}
 
-            <div
-              onClick={async () => {
-                await unlock();
-                await sfx('tap');
-                dispatch({ type: AT.NEXT });
-              }}
-              className="relative bg-black/80 border border-white/10 rounded-2xl p-5 md:p-6 min-h-[170px] backdrop-blur-xl cursor-pointer hover:border-white/20 transition"
-            >
-              <div className="text-lg md:text-xl text-white leading-relaxed" style={{ fontFamily: 'Inter, sans-serif', fontWeight: 500 }}>
+            {/* ✅ 대화박스는 클릭으로 진행하지 않음 */}
+            <div className="relative bg-black/80 border border-white/10 rounded-2xl p-5 md:p-6 min-h-[170px] backdrop-blur-xl">
+              <div className={`text-lg md:text-xl leading-relaxed ${view.isCE ? 'text-emerald-100' : 'text-white'}`} style={{ fontFamily: 'Inter, sans-serif', fontWeight: 500 }}>
                 {view.text}
               </div>
 
-              {view.isCE ? (
-                <div className="mt-5 flex flex-wrap gap-2">
+              {/* actions */}
+              <div className="mt-5 flex flex-wrap gap-2">
+                {view.isCE ? (
                   <button
                     onClick={async (e) => {
+                      e.preventDefault();
                       e.stopPropagation();
                       await unlock();
                       await sfx('tap');
@@ -1628,60 +1474,71 @@ export default function Page() {
                       if (view.stmt?.pressQ) doOverlay(view.stmt.pressQ);
                     }}
                     disabled={!pressable}
-                    className="px-4 py-2 rounded-xl bg-blue-600/80 hover:bg-blue-500 border border-blue-400/30 font-semibold flex items-center gap-2 disabled:opacity-40"
+                    className="px-4 py-2 rounded-xl bg-emerald-600/80 hover:bg-emerald-500 border border-emerald-400/30 font-semibold flex items-center gap-2 disabled:opacity-40"
                     style={{ fontFamily: 'Inter, sans-serif' }}
                   >
                     <Search className="w-4 h-4" />
                     추궁
                   </button>
+                ) : null}
 
-                  <button
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      await unlock();
-                      await sfx('tap');
-                      setEvidenceOpen(true);
-                      dispatch({ type: AT.OPEN_EVIDENCE });
-                    }}
-                    className="px-4 py-2 rounded-xl bg-amber-600/80 hover:bg-amber-500 border border-amber-400/30 font-semibold flex items-center gap-2"
-                    style={{ fontFamily: 'Inter, sans-serif' }}
-                  >
-                    <FileText className="w-4 h-4" />
-                    증거
-                  </button>
+                <button
+                  onClick={async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    await unlock();
+                    await sfx('tap');
+                    setEvidenceOpen(true);
+                    dispatch({ type: AT.OPEN_EVIDENCE });
+                  }}
+                  className="px-4 py-2 rounded-xl bg-amber-600/80 hover:bg-amber-500 border border-amber-400/30 font-semibold flex items-center gap-2"
+                  style={{ fontFamily: 'Inter, sans-serif' }}
+                >
+                  <FileText className="w-4 h-4" />
+                  증거
+                </button>
 
-                  <button
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      await unlock();
-                      await sfx('tap');
-                      dispatch({ type: AT.RESET });
-                      doOverlay('리셋');
-                    }}
-                    className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold flex items-center gap-2"
-                    style={{ fontFamily: 'Inter, sans-serif' }}
-                  >
-                    <RotateCcw className="w-4 h-4" />
-                    리셋
-                  </button>
-                </div>
-              ) : null}
+                <button
+                  onClick={async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    await unlock();
+                    await sfx('tap');
+                    dispatch({ type: AT.RESET });
+                    doOverlay('리셋');
+                  }}
+                  className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold flex items-center gap-2"
+                  style={{ fontFamily: 'Inter, sans-serif' }}
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  리셋
+                </button>
 
-              <div className="absolute bottom-4 right-4 opacity-50 pointer-events-none">
-                <ChevronRight className="w-6 h-6 animate-pulse" />
+                {/* ✅ NEXT 버튼만 진행 */}
+                <button
+                  onClick={async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (!canNext()) return;
+                    await unlock();
+                    await sfx('tap');
+                    dispatch({ type: AT.NEXT });
+                  }}
+                  className="ml-auto px-5 py-2 rounded-xl bg-white text-black font-black flex items-center gap-2"
+                  style={{ fontFamily: 'Inter, sans-serif' }}
+                >
+                  다음
+                  <ChevronRight className="w-5 h-5" />
+                </button>
               </div>
+
+              {hint ? <div className="mt-3 text-xs text-gray-400">{hint}</div> : null}
             </div>
-
-            {view.hint ? (
-              <div className="mt-3 text-xs text-gray-400" style={{ fontFamily: 'Inter, sans-serif' }}>
-                {view.hint}
-              </div>
-            ) : null}
           </div>
         </div>
       </div>
 
-      {/* Evidence */}
+      {/* Evidence Modal */}
       <EvidenceModal
         open={evidenceOpen && state.evidenceOpen}
         onClose={async () => {
@@ -1692,18 +1549,15 @@ export default function Page() {
         }}
         inventory={state.inv}
         evidenceMap={game.evidence}
-        admittedSet={admittedSet}
-        hint={view.hint}
         onPresent={(key) => doPresent(key)}
         onExamine={(key) => {
           setExamineKey(key);
           setExamineOpen(true);
         }}
         onOpenCombine={() => setCombineOpen(true)}
-        onOpenAdmission={(key) => openAdmission(key)}
+        hint={hint}
       />
 
-      {/* Combine */}
       <CombineModal
         open={combineOpen}
         onClose={() => {
@@ -1720,7 +1574,6 @@ export default function Page() {
         onApply={applyCombine}
       />
 
-      {/* Examine */}
       <ExamineModal
         open={examineOpen}
         onClose={() => {
@@ -1732,52 +1585,7 @@ export default function Page() {
         onFound={onHotspotFound}
       />
 
-      {/* Admission */}
-      <AdmissionModal
-        open={admissionOpen}
-        onClose={() => {
-          setAdmissionOpen(false);
-          setAdmissionKey(null);
-        }}
-        evidenceKey={admissionKey}
-        evidence={admissionKey ? game.evidence[admissionKey] : null}
-        admission={admission}
-        onOffer={offerAdmission}
-        onAdmit={admitEvidence}
-        onDeny={denyEvidence}
-      />
-
-      {/* Save/Load */}
-      <SaveLoadModal
-        open={saveOpen}
-        onClose={() => setSaveOpen(false)}
-        onSave={onSave}
-        onLoad={onLoad}
-        onDelete={onDelete}
-      />
+      <SaveLoadModal open={saveOpen} onClose={() => setSaveOpen(false)} onSave={onSave} onLoad={onLoad} onDelete={onDelete} />
     </div>
   );
-}
-
-/* =========================================================
-   11) Admission helpers (pure)
-========================================================= */
-function requestAdmission(adm, evidenceKey) {
-  if (adm.admitted.has(evidenceKey)) return { state: adm, requestId: null };
-  const next = { ...adm, pending: new Map(adm.pending) };
-  const requestId = uid('adm');
-  next.pending.set(requestId, { requestId, evidenceKey, objections: [] });
-  return { state: next, requestId };
-}
-function ruleAdmission(adm, requestId, decision) {
-  const next = { ...adm, admitted: new Set(adm.admitted), denied: new Map(adm.denied), pending: new Map(adm.pending) };
-  const req = next.pending.get(requestId);
-  if (!req) return next;
-  next.pending.delete(requestId);
-  if (decision === 'ADMIT') next.admitted.add(req.evidenceKey);
-  if (decision === 'DENY') next.denied.set(req.evidenceKey, { ts: now(), evidenceKey: req.evidenceKey, rationale: 'denied' });
-  return next;
-}
-function now() {
-  return typeof performance !== 'undefined' ? performance.now() : Date.now();
-  }
+    }
