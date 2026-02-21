@@ -19,15 +19,18 @@ import {
 
 /* =========================================================
    app/page.js — SINGLE FILE (RUNNABLE)
-   - Prev/Next (history snapshots)
-   - Typewriter + Blip
-   - Cross exam gate: evolve(Press) / weakness(Present) 없으면 진행 불가
-   - Evidence Present / Examine(hotspot) / Combine
-   - Save/Load
+   FIX:
+   - ✅ 하단 4개 버튼 정렬:
+     - 모바일: [추궁/증거/리셋] 한 줄 + [이전/다음] 한 줄
+     - 데스크톱: 좌(3개) / 우(이전/다음) 한 줄
+   - ✅ Pill/pickAvatar SSR 에러 방지 포함
+   - ✅ Prev/Next history snapshot
+   - ✅ Typewriter + Blip
+   - ✅ Cross exam gate (Press/Evolve, Weakness/Present)
 ========================================================= */
 
 /* =========================
-   0) Global CSS
+   Global CSS
 ========================= */
 const GLOBAL_CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap');
@@ -46,14 +49,14 @@ html,body{height:100%}
 `;
 
 /* =========================
-   1) UI primitives (must exist)
+   UI primitives (SSR-safe)
 ========================= */
 function Pill({ children }) {
   return <div className="px-4 py-2 rounded-full border border-white/10 bg-black/45 backdrop-blur-md">{children}</div>;
 }
 
 /* =========================
-   2) Utils
+   Utils
 ========================= */
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
@@ -99,7 +102,7 @@ function pickAvatar(char, face = 'normal') {
 }
 
 /* =========================
-   3) Typewriter
+   Typewriter
 ========================= */
 function useTypewriter(text, { enabled = true, cps = 34 } = {}) {
   const full = String(text ?? '');
@@ -177,7 +180,7 @@ function useTypewriter(text, { enabled = true, cps = 34 } = {}) {
 }
 
 /* =========================
-   4) LocalStorage Save
+   LocalStorage Save
 ========================= */
 const SAVE_NS = 'ACEVN_SAVE';
 const saveKey = (slot) => `${SAVE_NS}::slot::${slot}`;
@@ -210,7 +213,7 @@ function lsDelete(slot) {
 }
 
 /* =========================
-   5) Audio (SFX/BGM + Blip)
+   Audio (BGM/SFX + Blip)
 ========================= */
 function makeAudio(url, { loop = false, volume = 1 } = {}) {
   const a = new Audio(url);
@@ -374,7 +377,7 @@ function useAudioBus() {
 }
 
 /* =========================
-   6) Optional BG preload
+   Optional BG preload
 ========================= */
 function preloadImage(url) {
   return new Promise((resolve) => {
@@ -388,7 +391,7 @@ function preloadImage(url) {
 }
 
 /* =========================
-   7) GAME_DB (content)
+   GAME_DB
 ========================= */
 const GAME_DB = {
   meta: { title: '에피소드 1: 단선된 진실', description: '로그와 분류가 진실을 가장한다. 첫 재판에서 그 착각을 부순다.' },
@@ -412,8 +415,6 @@ const GAME_DB = {
           "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%2310B981'/%3E%3Ctext x='50' y='62' font-size='28' text-anchor='middle' fill='white'%3E경비%3C/text%3E%3C/svg%3E",
         sweat:
           "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23F59E0B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😰%3C/text%3E%3C/svg%3E",
-        crazy:
-          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23991B1B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E🤯%3C/text%3E%3C/svg%3E",
       },
     },
     witness2: {
@@ -424,8 +425,6 @@ const GAME_DB = {
           "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%238B5CF6'/%3E%3Ctext x='50' y='62' font-size='28' text-anchor='middle' fill='white'%3EIT%3C/text%3E%3C/svg%3E",
         sweat:
           "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23F59E0B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😰%3C/text%3E%3C/svg%3E",
-        crazy:
-          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23991B1B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😈%3C/text%3E%3C/svg%3E",
       },
     },
     witness3: {
@@ -436,8 +435,6 @@ const GAME_DB = {
           "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%2306B6D4'/%3E%3Ctext x='50' y='62' font-size='28' text-anchor='middle' fill='white'%3E기사%3C/text%3E%3C/svg%3E",
         sweat:
           "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23F59E0B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😰%3C/text%3E%3C/svg%3E",
-        crazy:
-          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23991B1B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😡%3C/text%3E%3C/svg%3E",
       },
     },
   },
@@ -585,7 +582,7 @@ const GAME_DB = {
 };
 
 /* =========================
-   8) Compile
+   Compile
 ========================= */
 function compileGame(db) {
   const baseCase = db.cases?.[0];
@@ -629,7 +626,6 @@ function compileGame(db) {
         contradictionEvidenceKey: s.contradictionEvidenceKey || null,
         failMsg: s.failMsg ? normalizeKoreanSentence(s.failMsg) : null,
       }));
-
       lines.push({ type: 'cross_exam', title: raw.title || '심문', bgKey: raw.bgKey || 'court', witnessCharKey: raw.witnessCharKey || 'witness1', statements });
       continue;
     }
@@ -650,7 +646,7 @@ function compileGame(db) {
 }
 
 /* =========================
-   9) Reducer + History
+   Reducer + History
 ========================= */
 const AT = {
   RESET: 'RESET',
@@ -770,8 +766,6 @@ function reducer(game, state, action) {
       if (s.weakness && s.contradictionEvidenceKey && action.key === s.contradictionEvidenceKey) {
         const base = line?.statements?.[state.ceIndex];
         const evolvedNext = { ...(state.evolved || {}) };
-
-        // clear weakness if it came from evolve
         if (base?.id && evolvedNext[base.id]) {
           const keep = { ...evolvedNext[base.id] };
           delete keep.weakness;
@@ -782,7 +776,6 @@ function reducer(game, state, action) {
 
         const tmp = { ...state, evolved: evolvedNext, pressMode: false, pressIndex: 0, evidenceOpen: false };
         const unresolved = findUnresolved(tmp);
-
         if (unresolved >= 0) return pushHistory({ ...tmp, ceIndex: unresolved });
 
         const nextIdx = clamp(state.idx + 1, 0, lines.length - 1);
@@ -840,7 +833,7 @@ function reducer(game, state, action) {
 }
 
 /* =========================
-   10) View
+   View
 ========================= */
 function deriveView(game, state) {
   const lines = game.lines || [];
@@ -885,24 +878,11 @@ function deriveView(game, state) {
     return '';
   })();
 
-  return {
-    line,
-    bgKey,
-    bgClass,
-    isCE,
-    ceTitle: isCE ? line.title : '',
-    ceIndex: isCE ? state.ceIndex : 0,
-    ceTotal: isCE ? (line.statements?.length || 0) : 0,
-    stmt,
-    speaker,
-    avatar,
-    text,
-    hint,
-  };
+  return { line, bgKey, bgClass, isCE, ceTitle: isCE ? line.title : '', ceIndex: isCE ? state.ceIndex : 0, ceTotal: isCE ? (line.statements?.length || 0) : 0, stmt, speaker, avatar, text, hint };
 }
 
 /* =========================
-   11) Evidence helpers
+   Evidence helpers
 ========================= */
 function findCombination(combos, a, b) {
   const req = [a, b].sort().join('::');
@@ -910,7 +890,7 @@ function findCombination(combos, a, b) {
 }
 
 /* =========================
-   12) Modals
+   Modals
 ========================= */
 function ModalShell({ open, onClose, title, icon, children, footer }) {
   if (!open) return null;
@@ -948,10 +928,10 @@ function EvidenceModal({ open, onClose, inventory, evidenceMap, onPresent, onExa
         <div className="flex items-center justify-between gap-3">
           <div className="text-xs text-gray-400">{hint || ''}</div>
           <div className="flex gap-2">
-            <button onClick={onOpenCombine} className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold">
+            <button onClick={onOpenCombine} className="h-10 px-4 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold">
               조합
             </button>
-            <button onClick={onClose} className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold">
+            <button onClick={onClose} className="h-10 px-4 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold">
               닫기
             </button>
           </div>
@@ -977,11 +957,11 @@ function EvidenceModal({ open, onClose, inventory, evidenceMap, onPresent, onExa
 
               <div className="mt-4 flex flex-wrap gap-2 justify-end">
                 {ev.examine ? (
-                  <button onClick={() => onExamine(key)} className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 font-semibold">
+                  <button onClick={() => onExamine(key)} className="h-10 px-4 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 font-semibold">
                     조사
                   </button>
                 ) : null}
-                <button onClick={() => onPresent(key)} className="px-4 py-2 rounded-xl bg-amber-600/80 hover:bg-amber-500 border border-amber-400/30 font-semibold">
+                <button onClick={() => onPresent(key)} className="h-10 px-4 rounded-xl bg-amber-600/80 hover:bg-amber-500 border border-amber-400/30 font-semibold">
                   제시
                 </button>
               </div>
@@ -1004,10 +984,10 @@ function CombineModal({ open, onClose, inventory, evidenceMap, a, b, onPickA, on
         <div className="flex items-center justify-between gap-3">
           <div className="text-xs text-gray-400">두 개를 골라 조합</div>
           <div className="flex gap-2">
-            <button onClick={onApply} className="px-4 py-2 rounded-xl bg-emerald-600/80 hover:bg-emerald-500 border border-emerald-400/30 font-semibold">
+            <button onClick={onApply} className="h-10 px-4 rounded-xl bg-emerald-600/80 hover:bg-emerald-500 border border-emerald-400/30 font-semibold">
               조합
             </button>
-            <button onClick={onClose} className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold">
+            <button onClick={onClose} className="h-10 px-4 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold">
               닫기
             </button>
           </div>
@@ -1066,7 +1046,7 @@ function ExamineModal({ open, onClose, evidenceKey, evidence, onFound }) {
       icon={<Search className="w-5 h-5 text-gray-200" />}
       footer={
         <div className="flex items-center justify-end">
-          <button onClick={onClose} className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold">
+          <button onClick={onClose} className="h-10 px-4 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold">
             닫기
           </button>
         </div>
@@ -1123,13 +1103,13 @@ function SaveLoadModal({ open, onClose, onSave, onLoad, onDelete }) {
           <div key={slot} className="rounded-2xl border border-white/10 bg-white/5 p-4 flex flex-wrap items-center gap-2">
             <div className="text-sm font-semibold text-white">슬롯 {slot}</div>
             <div className="ml-auto flex flex-wrap gap-2">
-              <button disabled={busy != null} onClick={() => run(slot, onSave, '저장 완료', '저장 실패')} className="px-3 py-2 rounded-xl bg-blue-600/80 hover:bg-blue-500 border border-blue-400/30 font-semibold disabled:opacity-40">
+              <button disabled={busy != null} onClick={() => run(slot, onSave, '저장 완료', '저장 실패')} className="h-10 px-3 rounded-xl bg-blue-600/80 hover:bg-blue-500 border border-blue-400/30 font-semibold disabled:opacity-40">
                 <span className="inline-flex items-center gap-2"><Save className="w-4 h-4" />저장</span>
               </button>
-              <button disabled={busy != null} onClick={() => run(slot, onLoad, '로드 완료', '로드 실패')} className="px-3 py-2 rounded-xl bg-emerald-600/80 hover:bg-emerald-500 border border-emerald-400/30 font-semibold disabled:opacity-40">
+              <button disabled={busy != null} onClick={() => run(slot, onLoad, '로드 완료', '로드 실패')} className="h-10 px-3 rounded-xl bg-emerald-600/80 hover:bg-emerald-500 border border-emerald-400/30 font-semibold disabled:opacity-40">
                 <span className="inline-flex items-center gap-2"><FolderOpen className="w-4 h-4" />로드</span>
               </button>
-              <button disabled={busy != null} onClick={() => run(slot, onDelete, '삭제 완료', '삭제 실패')} className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-500 border border-rose-400/30 font-semibold disabled:opacity-40">
+              <button disabled={busy != null} onClick={() => run(slot, onDelete, '삭제 완료', '삭제 실패')} className="h-10 px-3 rounded-xl bg-rose-600/80 hover:bg-rose-500 border border-rose-400/30 font-semibold disabled:opacity-40">
                 <span className="inline-flex items-center gap-2"><Trash2 className="w-4 h-4" />삭제</span>
               </button>
             </div>
@@ -1141,11 +1121,10 @@ function SaveLoadModal({ open, onClose, onSave, onLoad, onDelete }) {
 }
 
 /* =========================
-   13) Page
+   Page
 ========================= */
 export default function Page() {
   const audio = useAudioBus();
-
   const game = useMemo(() => compileGame(GAME_DB), []);
   const [state, dispatch] = useReducer((s, a) => reducer(game, s, a), undefined, () => initialState(game));
   const view = useMemo(() => deriveView(game, state), [game, state]);
@@ -1190,18 +1169,15 @@ export default function Page() {
     await audio.playSfx(k, url).catch(() => {});
   };
 
-  // optional bg image
   useEffect(() => {
     const candidate = `/assets/bg/${view.bgKey}.webp`;
     preloadImage(candidate).then((ok) => setBgUrl(ok ? candidate : null));
   }, [view.bgKey]);
 
-  // auto-advance scene
   useEffect(() => {
     if (view.line?.type === 'scene') dispatch({ type: AT.NEXT });
   }, [view.line?.type]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // anim effects + auto-advance
   useEffect(() => {
     if (view.line?.type !== 'anim') return;
     if (view.line.name === 'objection') {
@@ -1273,7 +1249,6 @@ export default function Page() {
       return;
     }
     const hit = findCombination(game.combinations, a, b);
-
     setCombineOpen(false);
     setCombineA(null);
     setCombineB(null);
@@ -1282,12 +1257,10 @@ export default function Page() {
       doOverlay('조합 결과가 없습니다.');
       return;
     }
-
     if (!state.inv.includes(hit.result)) {
       const inv = Array.from(new Set([...state.inv, hit.result]));
       dispatch({ type: AT.HYDRATE, state: { ...state, inv } });
     }
-
     doOverlay(hit.successMsg || '새 단서를 얻었습니다.');
     await sfx('tap');
   };
@@ -1324,7 +1297,6 @@ export default function Page() {
     return { ok: res.ok, msg: res.ok ? `슬롯 ${slot} 삭제 완료` : `삭제 실패: ${res.reason}` };
   };
 
-  // Gameover / Ending (simple)
   if (state.gameOver) {
     return (
       <div className={`min-h-screen ${GAME_DB.backgrounds.gameover} text-white flex items-center justify-center p-6`} style={bgStyle}>
@@ -1332,7 +1304,7 @@ export default function Page() {
         <div className="w-full max-w-lg rounded-3xl bg-black/60 border border-white/10 backdrop-blur-xl p-8 text-center">
           <div className="text-6xl mb-4">💥</div>
           <div className="text-4xl font-bold mb-3" style={{ fontFamily: 'Crimson Pro, serif' }}>게임 오버</div>
-          <button onClick={() => dispatch({ type: AT.RESET })} className="px-6 py-3 rounded-xl bg-white text-black font-semibold">다시 시작</button>
+          <button onClick={() => dispatch({ type: AT.RESET })} className="h-11 px-6 rounded-xl bg-white text-black font-semibold">다시 시작</button>
         </div>
       </div>
     );
@@ -1345,7 +1317,7 @@ export default function Page() {
         <div className="w-full max-w-2xl rounded-3xl bg-black/60 border border-white/10 backdrop-blur-xl p-8 text-center">
           <Scale className="w-20 h-20 mx-auto mb-5 text-blue-400" />
           <div className="text-5xl font-bold mb-3" style={{ fontFamily: 'Crimson Pro, serif' }}>{GAME_DB.meta.title}</div>
-          <button onClick={() => dispatch({ type: AT.RESET })} className="px-6 py-3 rounded-xl bg-white text-black font-semibold">다시하기</button>
+          <button onClick={() => dispatch({ type: AT.RESET })} className="h-11 px-6 rounded-xl bg-white text-black font-semibold">다시하기</button>
         </div>
       </div>
     );
@@ -1462,63 +1434,76 @@ export default function Page() {
                 {!typedDone ? <span className="inline-block w-2">▍</span> : null}
               </div>
 
-              <div className="mt-5 flex flex-wrap gap-2">
-                {view.isCE ? (
+              {/* ✅ BUTTON ALIGN FIX HERE */}
+              <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-wrap items-center gap-2">
+                  {view.isCE ? (
+                    <button
+                      onClick={async (e) => {
+                        e.preventDefault(); e.stopPropagation();
+                        await unlock(); await sfx('tap');
+                        if (!typedDone) { typedSkip(); return; }
+                        dispatch({ type: AT.PRESS });
+                        if (view.stmt?.pressQ) doOverlay(view.stmt.pressQ);
+                      }}
+                      disabled={!pressable}
+                      className="h-11 px-4 rounded-xl bg-emerald-600/80 hover:bg-emerald-500 border border-emerald-400/30 font-semibold flex items-center gap-2 disabled:opacity-40"
+                      style={{ fontFamily: 'Inter, sans-serif' }}
+                    >
+                      <Search className="w-4 h-4" />
+                      추궁
+                    </button>
+                  ) : null}
+
                   <button
                     onClick={async (e) => {
                       e.preventDefault(); e.stopPropagation();
                       await unlock(); await sfx('tap');
                       if (!typedDone) { typedSkip(); return; }
-                      dispatch({ type: AT.PRESS });
-                      if (view.stmt?.pressQ) doOverlay(view.stmt.pressQ);
+                      setEvidenceOpen(true);
+                      dispatch({ type: AT.OPEN_EVIDENCE });
                     }}
-                    disabled={!pressable}
-                    className="px-4 py-2 rounded-xl bg-emerald-600/80 hover:bg-emerald-500 border border-emerald-400/30 font-semibold flex items-center gap-2 disabled:opacity-40"
+                    className="h-11 px-4 rounded-xl bg-amber-600/80 hover:bg-amber-500 border border-amber-400/30 font-semibold flex items-center gap-2"
                     style={{ fontFamily: 'Inter, sans-serif' }}
                   >
-                    <Search className="w-4 h-4" />
-                    추궁
+                    <FileText className="w-4 h-4" />
+                    증거
                   </button>
-                ) : null}
 
-                <button
-                  onClick={async (e) => {
-                    e.preventDefault(); e.stopPropagation();
-                    await unlock(); await sfx('tap');
-                    if (!typedDone) { typedSkip(); return; }
-                    setEvidenceOpen(true);
-                    dispatch({ type: AT.OPEN_EVIDENCE });
-                  }}
-                  className="px-4 py-2 rounded-xl bg-amber-600/80 hover:bg-amber-500 border border-amber-400/30 font-semibold flex items-center gap-2"
-                  style={{ fontFamily: 'Inter, sans-serif' }}
-                >
-                  <FileText className="w-4 h-4" />
-                  증거
-                </button>
+                  <button
+                    onClick={async (e) => {
+                      e.preventDefault(); e.stopPropagation();
+                      await unlock(); await sfx('tap');
+                      dispatch({ type: AT.RESET });
+                      doOverlay('리셋했습니다.');
+                    }}
+                    className="h-11 px-4 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold flex items-center gap-2"
+                    style={{ fontFamily: 'Inter, sans-serif' }}
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    리셋
+                  </button>
+                </div>
 
-                <button
-                  onClick={async (e) => {
-                    e.preventDefault(); e.stopPropagation();
-                    await unlock(); await sfx('tap');
-                    dispatch({ type: AT.RESET });
-                    doOverlay('리셋했습니다.');
-                  }}
-                  className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold flex items-center gap-2"
-                  style={{ fontFamily: 'Inter, sans-serif' }}
-                >
-                  <RotateCcw className="w-4 h-4" />
-                  리셋
-                </button>
+                <div className="flex items-center gap-2 justify-end">
+                  <button
+                    onClick={async (e) => { e.preventDefault(); e.stopPropagation(); await onPrev(); }}
+                    className="h-11 px-4 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold flex items-center gap-2"
+                    style={{ fontFamily: 'Inter, sans-serif' }}
+                  >
+                    <ChevronLeft className="w-5 h-5" />
+                    이전
+                  </button>
 
-                <button onClick={onPrev} className="ml-auto px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold flex items-center gap-2" style={{ fontFamily: 'Inter, sans-serif' }}>
-                  <ChevronLeft className="w-5 h-5" />
-                  이전
-                </button>
-
-                <button onClick={onNext} className="px-5 py-2 rounded-xl bg-white text-black font-black flex items-center gap-2" style={{ fontFamily: 'Inter, sans-serif' }}>
-                  다음
-                  <ChevronRight className="w-5 h-5" />
-                </button>
+                  <button
+                    onClick={async (e) => { e.preventDefault(); e.stopPropagation(); await onNext(); }}
+                    className="h-11 px-5 rounded-xl bg-white text-black font-black flex items-center gap-2"
+                    style={{ fontFamily: 'Inter, sans-serif' }}
+                  >
+                    다음
+                    <ChevronRight className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
 
               {view.hint ? <div className="mt-3 text-xs text-gray-400">{view.hint}</div> : null}
@@ -1527,6 +1512,7 @@ export default function Page() {
         </div>
       </div>
 
+      {/* Modals */}
       <EvidenceModal
         open={evidenceOpen && state.evidenceOpen}
         onClose={async () => { await unlock(); await sfx('tap'); setEvidenceOpen(false); dispatch({ type: AT.CLOSE_EVIDENCE }); }}
@@ -1567,4 +1553,4 @@ export default function Page() {
       />
     </div>
   );
-    }
+                       }
