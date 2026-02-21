@@ -3,7 +3,6 @@
 import React, { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import {
   Scale,
-  AlertCircle,
   FileText,
   Search,
   ChevronRight,
@@ -15,18 +14,30 @@ import {
   FolderOpen,
   Trash2,
   Save,
+  ScrollText,
+  Check,
 } from 'lucide-react';
 
 /* =========================================================
    app/page.js — SINGLE FILE (RUNNABLE)
-   FIX:
-   - ✅ 하단 4개 버튼 정렬:
-     - 모바일: [추궁/증거/리셋] 한 줄 + [이전/다음] 한 줄
-     - 데스크톱: 좌(3개) / 우(이전/다음) 한 줄
-   - ✅ Pill/pickAvatar SSR 에러 방지 포함
-   - ✅ Prev/Next history snapshot
-   - ✅ Typewriter + Blip
-   - ✅ Cross exam gate (Press/Evolve, Weakness/Present)
+   ✅ Added (requested):
+   1) Backlog (Log)
+      - state.log: []
+      - NEXT / PRESS_NEXT / PRESENT(전진) 시 현재(완료된) 화자+텍스트 로그 누적
+      - HUD에 로그 버튼 + LogModal(스크롤 가능)
+   2) Save/Load UX
+      - 저장: savedAt(YYYY-MM-DD HH:MM), chapterTitle, snippet 저장
+      - SaveLoadModal에서 슬롯 메타 표시 (빈 슬롯 표시)
+   3) Record 퍼즐
+      - 심문 중 [기록] 버튼(Check, emerald)
+      - 현재 stmt.text를 dynamic evidence로 추가: key = record_<stmtId>
+      - EvidenceModal에서 '💬' 아이콘 + [증언 갈무리] 화자: ... 표시
+
+   ✅ Preserved:
+   - Reducer 구조(단일 reducer)
+   - Typewriter + Blip(WebAudio oscillator)
+   - 모바일 대응 UI / safe-area
+   - click-to-advance 없음 (버튼으로만 진행)
 ========================================================= */
 
 /* =========================
@@ -99,6 +110,19 @@ function pickAvatar(char, face = 'normal') {
   const a = char?.avatars || {};
   if (a && typeof a === 'object') return a[face] || a.normal || null;
   return null;
+}
+function pad2(n) {
+  const v = String(n);
+  return v.length >= 2 ? v : `0${v}`;
+}
+function formatYYYYMMDDHHMM(d) {
+  const dt = d instanceof Date ? d : new Date();
+  return `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())} ${pad2(dt.getHours())}:${pad2(dt.getMinutes())}`;
+}
+function snippetOf(text, n = 26) {
+  const s = String(text ?? '').replace(/\s+/g, ' ').trim();
+  if (!s) return '';
+  return s.length <= n ? s : s.slice(0, n) + '…';
 }
 
 /* =========================
@@ -394,7 +418,7 @@ function preloadImage(url) {
    GAME_DB
 ========================= */
 const GAME_DB = {
-  meta: { title: '에피소드 1: 단선된 진실', description: '로그와 분류가 진실을 가장한다. 첫 재판에서 그 착각을 부순다.' },
+  meta: { title: '제1화: 단선된 진실', description: '로그와 분류가 진실을 가장한다. 첫 재판에서 그 착각을 부순다.' },
   backgrounds: {
     court: 'bg-gradient-to-b from-slate-950 via-slate-900 to-black',
     hall: 'bg-gradient-to-b from-slate-900 to-slate-800',
@@ -472,7 +496,7 @@ const GAME_DB = {
       script: [
         { type: 'scene', bgKey: 'court', bgmKey: 'trial' },
         { type: 'talk', charKey: 'judge', text: '지금부터 재판을 시작하겠습니다. 핵심만 말하세요' },
-        { type: 'talk', charKey: 'prosecutor', text: '정리부터 하죠. 21시. 서버실. 한 번의 타격. 그게 전부입니다' },
+        { type: 'talk', charKey: 'prosecutor', text: '정리부터 하죠. 21시, 서버실, 한 번의 타격. 그게 전부입니다' },
         { type: 'talk', charKey: 'player', text: '전부라고요. 그 말부터 먼저 깨겠습니다' },
 
         { type: 'anim', name: 'cross_start' },
@@ -646,7 +670,7 @@ function compileGame(db) {
 }
 
 /* =========================
-   Reducer + History
+   Reducer + History + Log + Dynamic Evidence
 ========================= */
 const AT = {
   RESET: 'RESET',
@@ -658,6 +682,7 @@ const AT = {
   OPEN_EVIDENCE: 'OPEN_EVIDENCE',
   CLOSE_EVIDENCE: 'CLOSE_EVIDENCE',
   HYDRATE: 'HYDRATE',
+  RECORD: 'RECORD',
 };
 
 function initialState(game) {
@@ -667,6 +692,7 @@ function initialState(game) {
     hpMax: game.apMax,
     hp: game.apMax,
     inv: Array.from(new Set(game.initialEvidence || [])),
+    dynamicEvidence: {}, // record_*
     ceIndex: 0,
     pressMode: false,
     pressIndex: 0,
@@ -675,12 +701,42 @@ function initialState(game) {
     ending: false,
     gameOver: false,
     history: [],
+    log: [], // ✅ backlog
   };
 }
 
-function stripHistory(s) {
-  const { history, ...rest } = s;
+function stripHistory(state) {
+  const { history, ...rest } = state;
   return rest;
+}
+
+function computeDisplayForLog(game, state) {
+  const lines = game.lines || [];
+  const line = lines[state.idx];
+  const chars = game.characters || {};
+
+  if (!line) return { speakerName: '', text: '' };
+
+  if (line.type === 'cross_exam') {
+    const stmt0 = line.statements?.[state.ceIndex] || null;
+    const ev = stmt0 ? state.evolved?.[stmt0.id] : null;
+    const stmt = stmt0 ? (ev ? { ...stmt0, ...ev } : stmt0) : null;
+
+    if (state.pressMode && stmt?.press?.length) {
+      const p = stmt.press[state.pressIndex] || null;
+      const ck = p?.charKey || line.witnessCharKey || 'witness1';
+      return { speakerName: chars[ck]?.name || ck, text: p?.text || '' };
+    }
+    const ck = line.witnessCharKey || 'witness1';
+    return { speakerName: chars[ck]?.name || ck, text: stmt?.text || '' };
+  }
+
+  if (line.type === 'talk') {
+    const ck = line.charKey || 'judge';
+    return { speakerName: chars[ck]?.name || ck, text: line.text || '' };
+  }
+
+  return { speakerName: '', text: '' };
 }
 
 function reducer(game, state, action) {
@@ -720,6 +776,21 @@ function reducer(game, state, action) {
     return { ...nextState, history: hist };
   };
 
+  const appendLog = (baseState) => {
+    const { speakerName, text } = computeDisplayForLog(game, state);
+    const t = String(text || '').trim();
+    const n = String(speakerName || '').trim();
+    if (!t || !n) return baseState;
+
+    const log = Array.isArray(baseState.log) ? baseState.log.slice() : [];
+    const last = log.length ? log[log.length - 1] : null;
+    if (last && last.name === n && last.text === t) return baseState;
+
+    log.push({ ts: Date.now(), name: n, text: t });
+    if (log.length > 800) log.shift();
+    return { ...baseState, log };
+  };
+
   switch (action.type) {
     case AT.RESET:
       return initialState(game);
@@ -732,6 +803,41 @@ function reducer(game, state, action) {
     case AT.CLOSE_EVIDENCE:
       return { ...state, evidenceOpen: false };
 
+    case AT.RECORD: {
+      if (!line || line.type !== 'cross_exam') return state;
+      const stmt0 = line.statements?.[state.ceIndex] || null;
+      if (!stmt0) return state;
+
+      const key = `record_${stmt0.id}`;
+      const invSet = new Set(state.inv || []);
+      invSet.add(key);
+
+      const chars = game.characters || {};
+      const whoKey = line.witnessCharKey || 'witness1';
+      const whoName = chars[whoKey]?.name || whoKey;
+
+      const evMap = { ...(state.dynamicEvidence || {}) };
+      if (!evMap[key]) {
+        // record uses current merged text (including evolved)
+        const merged = getMergedStmtAt(state, state.ceIndex);
+        const recordText = String(merged?.text || '').trim();
+
+        evMap[key] = {
+          name: `증언 갈무리`,
+          icon: '💬',
+          desc: `[증언 갈무리] 화자: ${whoName}\n${recordText}`,
+          _meta: { type: 'record', stmtId: stmt0.id, speaker: whoName },
+        };
+      }
+
+      const next = {
+        ...state,
+        inv: Array.from(invSet),
+        dynamicEvidence: evMap,
+      };
+      return pushHistory(next);
+    }
+
     case AT.PRESS: {
       if (!line || line.type !== 'cross_exam') return state;
       const s = getMergedStmtAt(state, state.ceIndex);
@@ -743,19 +849,20 @@ function reducer(game, state, action) {
       if (!state.pressMode) return state;
       const s = getMergedStmtAt(state, state.ceIndex);
       const n = s?.press?.length || 0;
-      if (n <= 0) return pushHistory({ ...state, pressMode: false, pressIndex: 0 });
+      if (n <= 0) return pushHistory(appendLog({ ...state, pressMode: false, pressIndex: 0 }));
 
       const last = state.pressIndex >= n - 1;
-      if (!last) return pushHistory({ ...state, pressIndex: state.pressIndex + 1 });
+      if (!last) return pushHistory(appendLog({ ...state, pressIndex: state.pressIndex + 1 }));
 
+      // leaving last press line -> log then evolve
       const base = line?.statements?.[state.ceIndex];
       const evo = s?.evolveOnPress;
       if (base && evo) {
         const nextEvolved = { ...(state.evolved || {}) };
         nextEvolved[base.id] = { text: evo.newText, weakness: !!evo.weakness, contradictionEvidenceKey: evo.contradictionEvidenceKey, failMsg: evo.failMsg };
-        return pushHistory({ ...state, evolved: nextEvolved, pressMode: false, pressIndex: 0 });
+        return pushHistory(appendLog({ ...state, evolved: nextEvolved, pressMode: false, pressIndex: 0 }));
       }
-      return pushHistory({ ...state, pressMode: false, pressIndex: 0 });
+      return pushHistory(appendLog({ ...state, pressMode: false, pressIndex: 0 }));
     }
 
     case AT.PRESENT: {
@@ -774,7 +881,7 @@ function reducer(game, state, action) {
           evolvedNext[base.id] = keep;
         }
 
-        const tmp = { ...state, evolved: evolvedNext, pressMode: false, pressIndex: 0, evidenceOpen: false };
+        const tmp = appendLog({ ...state, evolved: evolvedNext, pressMode: false, pressIndex: 0, evidenceOpen: false });
         const unresolved = findUnresolved(tmp);
         if (unresolved >= 0) return pushHistory({ ...tmp, ceIndex: unresolved });
 
@@ -784,7 +891,7 @@ function reducer(game, state, action) {
       }
 
       const hp = Math.max(0, state.hp - 1);
-      return pushHistory({ ...state, hp, gameOver: hp <= 0 });
+      return pushHistory(appendLog({ ...state, hp, gameOver: hp <= 0 }));
     }
 
     case AT.NEXT: {
@@ -793,30 +900,33 @@ function reducer(game, state, action) {
 
       if (!line) return state;
 
+      // log before moving
+      const baseLogged = appendLog(state);
+
       if (line.type === 'scene' || line.type === 'anim') {
         const nextIdx = clamp(state.idx + 1, 0, lines.length - 1);
         const nextLine = lines[nextIdx];
-        return pushHistory({ ...state, idx: nextIdx, bgKey: nextLine?.bgKey || state.bgKey });
+        return pushHistory({ ...baseLogged, idx: nextIdx, bgKey: nextLine?.bgKey || baseLogged.bgKey });
       }
 
-      if (line.type === 'end') return pushHistory({ ...state, ending: true });
+      if (line.type === 'end') return pushHistory({ ...baseLogged, ending: true });
 
       if (line.type === 'cross_exam') {
         const total = line.statements?.length || 0;
         const last = state.ceIndex >= total - 1;
         if (last) {
-          const unresolved = findUnresolved(state);
-          if (unresolved >= 0) return pushHistory({ ...state, ceIndex: unresolved });
+          const unresolved = findUnresolved(baseLogged);
+          if (unresolved >= 0) return pushHistory({ ...baseLogged, ceIndex: unresolved });
           const nextIdx = clamp(state.idx + 1, 0, lines.length - 1);
           const nextLine = lines[nextIdx];
-          return pushHistory({ ...state, idx: nextIdx, bgKey: nextLine?.bgKey || state.bgKey, ceIndex: 0 });
+          return pushHistory({ ...baseLogged, idx: nextIdx, bgKey: nextLine?.bgKey || baseLogged.bgKey, ceIndex: 0 });
         }
-        return pushHistory({ ...state, ceIndex: state.ceIndex + 1 });
+        return pushHistory({ ...baseLogged, ceIndex: state.ceIndex + 1 });
       }
 
       const nextIdx = clamp(state.idx + 1, 0, lines.length - 1);
       const nextLine = lines[nextIdx];
-      return pushHistory({ ...state, idx: nextIdx, bgKey: nextLine?.bgKey || state.bgKey });
+      return pushHistory({ ...baseLogged, idx: nextIdx, bgKey: nextLine?.bgKey || baseLogged.bgKey });
     }
 
     case AT.PREV: {
@@ -842,6 +952,9 @@ function deriveView(game, state) {
 
   const bgKey = state.bgKey || line?.bgKey || 'court';
   const bgClass = game.backgrounds?.[bgKey] || 'bg-gradient-to-b from-slate-950 via-slate-900 to-black';
+
+  const dynamicEvidence = state.dynamicEvidence || {};
+  const evidenceMap = { ...(game.evidence || {}), ...(dynamicEvidence || {}) };
 
   const isCE = line?.type === 'cross_exam';
   const stmt0 = isCE ? (line.statements?.[state.ceIndex] || null) : null;
@@ -878,7 +991,21 @@ function deriveView(game, state) {
     return '';
   })();
 
-  return { line, bgKey, bgClass, isCE, ceTitle: isCE ? line.title : '', ceIndex: isCE ? state.ceIndex : 0, ceTotal: isCE ? (line.statements?.length || 0) : 0, stmt, speaker, avatar, text, hint };
+  return {
+    line,
+    bgKey,
+    bgClass,
+    isCE,
+    ceTitle: isCE ? line.title : '',
+    ceIndex: isCE ? state.ceIndex : 0,
+    ceTotal: isCE ? (line.statements?.length || 0) : 0,
+    stmt,
+    speaker,
+    avatar,
+    text,
+    hint,
+    evidenceMap,
+  };
 }
 
 /* =========================
@@ -917,6 +1044,46 @@ function ModalShell({ open, onClose, title, icon, children, footer }) {
   );
 }
 
+function LogModal({ open, onClose, log }) {
+  return (
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      title="로그"
+      icon={<ScrollText className="w-5 h-5 text-gray-200" />}
+      footer={
+        <div className="flex items-center justify-end">
+          <button onClick={onClose} className="h-10 px-4 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold">
+            닫기
+          </button>
+        </div>
+      }
+    >
+      <div className="space-y-3">
+        {Array.isArray(log) && log.length ? (
+          log
+            .slice()
+            .reverse()
+            .map((e, i) => (
+              <div key={i} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <div className="text-sm font-semibold text-white" style={{ fontFamily: 'Inter, sans-serif' }}>
+                  {e.name}
+                </div>
+                <div className="mt-2 text-sm text-gray-200 leading-relaxed" style={{ fontFamily: 'Inter, sans-serif' }}>
+                  {e.text}
+                </div>
+              </div>
+            ))
+        ) : (
+          <div className="text-sm text-gray-400" style={{ fontFamily: 'Inter, sans-serif' }}>
+            아직 기록된 대화가 없다.
+          </div>
+        )}
+      </div>
+    </ModalShell>
+  );
+}
+
 function EvidenceModal({ open, onClose, inventory, evidenceMap, onPresent, onExamine, onOpenCombine, hint }) {
   return (
     <ModalShell
@@ -926,7 +1093,7 @@ function EvidenceModal({ open, onClose, inventory, evidenceMap, onPresent, onExa
       icon={<FileText className="w-5 h-5 text-amber-300" />}
       footer={
         <div className="flex items-center justify-between gap-3">
-          <div className="text-xs text-gray-400">{hint || ''}</div>
+          <div className="text-xs text-gray-400 whitespace-pre-wrap">{hint || ''}</div>
           <div className="flex gap-2">
             <button onClick={onOpenCombine} className="h-10 px-4 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold">
               조합
@@ -939,19 +1106,26 @@ function EvidenceModal({ open, onClose, inventory, evidenceMap, onPresent, onExa
       }
     >
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {inventory.map((key) => {
-          const ev = evidenceMap[key];
+        {(inventory || []).map((key) => {
+          const ev = evidenceMap?.[key];
           if (!ev) return null;
+
+          const icon = ev.icon || '🗂️';
+          const name = ev.name || key;
+          const desc = ev.desc || '';
+
           return (
             <div key={key} className="rounded-2xl border border-white/10 bg-white/5 p-4">
               <div className="flex items-start gap-4">
-                <div className="text-4xl">{ev.icon || '🗂️'}</div>
+                <div className="text-4xl">{icon}</div>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <div className="text-base font-semibold text-white">{ev.name}</div>
-                    <span className="text-xs font-mono px-2 py-1 rounded-full bg-black/30 border border-white/10 text-gray-300">{key}</span>
+                    <div className="text-base font-semibold text-white">{name}</div>
+                    <span className="text-xs font-mono px-2 py-1 rounded-full bg-black/30 border border-white/10 text-gray-300">
+                      {key}
+                    </span>
                   </div>
-                  <div className="mt-2 text-sm text-gray-300 leading-relaxed">{ev.desc}</div>
+                  <div className="mt-2 text-sm text-gray-300 leading-relaxed whitespace-pre-wrap">{desc}</div>
                 </div>
               </div>
 
@@ -996,15 +1170,15 @@ function CombineModal({ open, onClose, inventory, evidenceMap, a, b, onPickA, on
     >
       <div className="rounded-2xl border border-white/10 bg-white/5 p-4 mb-4">
         <div className="text-sm text-gray-200">
-          A: <span className="font-semibold text-white">{a ? (evidenceMap[a]?.name || a) : '선택'}</span>
+          A: <span className="font-semibold text-white">{a ? (evidenceMap?.[a]?.name || a) : '선택'}</span>
           <span className="mx-2 text-gray-500">·</span>
-          B: <span className="font-semibold text-white">{b ? (evidenceMap[b]?.name || b) : '선택'}</span>
+          B: <span className="font-semibold text-white">{b ? (evidenceMap?.[b]?.name || b) : '선택'}</span>
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        {inventory.map((key) => {
-          const ev = evidenceMap[key];
+        {(inventory || []).map((key) => {
+          const ev = evidenceMap?.[key];
           if (!ev) return null;
           const selected = a === key || b === key;
           return (
@@ -1022,8 +1196,8 @@ function CombineModal({ open, onClose, inventory, evidenceMap, a, b, onPickA, on
               <div className="flex items-start gap-3">
                 <div className="text-3xl">{ev.icon || '🗂️'}</div>
                 <div className="min-w-0">
-                  <div className="text-sm font-semibold text-white">{ev.name}</div>
-                  <div className="text-xs text-gray-400 mt-1">{ev.desc}</div>
+                  <div className="text-sm font-semibold text-white">{ev.name || key}</div>
+                  <div className="text-xs text-gray-400 mt-1">{ev.desc || ''}</div>
                 </div>
               </div>
             </button>
@@ -1073,7 +1247,7 @@ function ExamineModal({ open, onClose, evidenceKey, evidence, onFound }) {
   );
 }
 
-function SaveLoadModal({ open, onClose, onSave, onLoad, onDelete }) {
+function SaveLoadModal({ open, onClose, slotsMeta, onSave, onLoad, onDelete }) {
   const [toast, setToast] = useState(null);
   const [busy, setBusy] = useState(null);
 
@@ -1091,7 +1265,19 @@ function SaveLoadModal({ open, onClose, onSave, onLoad, onDelete }) {
   };
 
   return (
-    <ModalShell open={open} onClose={onClose} title="세이브/로드" icon={<HardDrive className="w-5 h-5 text-gray-200" />}>
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      title="세이브/로드"
+      icon={<HardDrive className="w-5 h-5 text-gray-200" />}
+      footer={
+        <div className="flex items-center justify-end">
+          <button onClick={onClose} className="h-10 px-4 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold">
+            닫기
+          </button>
+        </div>
+      }
+    >
       {toast ? (
         <div className={`mb-4 rounded-2xl border px-4 py-3 text-sm ${toast.ok ? 'bg-emerald-500/10 border-emerald-400/20 text-emerald-100' : 'bg-rose-500/10 border-rose-400/20 text-rose-100'}`}>
           {toast.msg}
@@ -1099,22 +1285,52 @@ function SaveLoadModal({ open, onClose, onSave, onLoad, onDelete }) {
       ) : null}
 
       <div className="space-y-3">
-        {[1, 2, 3].map((slot) => (
-          <div key={slot} className="rounded-2xl border border-white/10 bg-white/5 p-4 flex flex-wrap items-center gap-2">
-            <div className="text-sm font-semibold text-white">슬롯 {slot}</div>
-            <div className="ml-auto flex flex-wrap gap-2">
-              <button disabled={busy != null} onClick={() => run(slot, onSave, '저장 완료', '저장 실패')} className="h-10 px-3 rounded-xl bg-blue-600/80 hover:bg-blue-500 border border-blue-400/30 font-semibold disabled:opacity-40">
-                <span className="inline-flex items-center gap-2"><Save className="w-4 h-4" />저장</span>
-              </button>
-              <button disabled={busy != null} onClick={() => run(slot, onLoad, '로드 완료', '로드 실패')} className="h-10 px-3 rounded-xl bg-emerald-600/80 hover:bg-emerald-500 border border-emerald-400/30 font-semibold disabled:opacity-40">
-                <span className="inline-flex items-center gap-2"><FolderOpen className="w-4 h-4" />로드</span>
-              </button>
-              <button disabled={busy != null} onClick={() => run(slot, onDelete, '삭제 완료', '삭제 실패')} className="h-10 px-3 rounded-xl bg-rose-600/80 hover:bg-rose-500 border border-rose-400/30 font-semibold disabled:opacity-40">
-                <span className="inline-flex items-center gap-2"><Trash2 className="w-4 h-4" />삭제</span>
-              </button>
+        {[1, 2, 3].map((slot) => {
+          const meta = slotsMeta?.[slot] || null;
+          const label = meta
+            ? `${meta.chapterTitle || '에피소드'} / ${meta.savedAt || ''}`
+            : '빈 슬롯';
+          const sub = meta?.snippet ? meta.snippet : '';
+
+          return (
+            <div key={slot} className="rounded-2xl border border-white/10 bg-white/5 p-4 flex flex-col gap-3">
+              <div className="flex items-start gap-3">
+                <div className="text-sm font-semibold text-white">슬롯 {slot}</div>
+                <div className="ml-auto text-xs text-gray-300 font-semibold">{label}</div>
+              </div>
+
+              {meta ? (
+                <div className="text-xs text-gray-400 whitespace-pre-wrap">{sub}</div>
+              ) : (
+                <div className="text-xs text-gray-500">저장 데이터가 없다.</div>
+              )}
+
+              <div className="flex flex-wrap gap-2 justify-end">
+                <button
+                  disabled={busy != null}
+                  onClick={() => run(slot, onSave, '저장 완료', '저장 실패')}
+                  className="h-10 px-3 rounded-xl bg-blue-600/80 hover:bg-blue-500 border border-blue-400/30 font-semibold disabled:opacity-40"
+                >
+                  <span className="inline-flex items-center gap-2"><Save className="w-4 h-4" />저장</span>
+                </button>
+                <button
+                  disabled={busy != null || !meta}
+                  onClick={() => run(slot, onLoad, '로드 완료', '로드 실패')}
+                  className="h-10 px-3 rounded-xl bg-emerald-600/80 hover:bg-emerald-500 border border-emerald-400/30 font-semibold disabled:opacity-40"
+                >
+                  <span className="inline-flex items-center gap-2"><FolderOpen className="w-4 h-4" />로드</span>
+                </button>
+                <button
+                  disabled={busy != null || !meta}
+                  onClick={() => run(slot, onDelete, '삭제 완료', '삭제 실패')}
+                  className="h-10 px-3 rounded-xl bg-rose-600/80 hover:bg-rose-500 border border-rose-400/30 font-semibold disabled:opacity-40"
+                >
+                  <span className="inline-flex items-center gap-2"><Trash2 className="w-4 h-4" />삭제</span>
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </ModalShell>
   );
@@ -1136,6 +1352,7 @@ export default function Page() {
   const [combineOpen, setCombineOpen] = useState(false);
   const [examineOpen, setExamineOpen] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
+  const [logOpen, setLogOpen] = useState(false);
 
   const [combineA, setCombineA] = useState(null);
   const [combineB, setCombineB] = useState(null);
@@ -1174,10 +1391,12 @@ export default function Page() {
     preloadImage(candidate).then((ok) => setBgUrl(ok ? candidate : null));
   }, [view.bgKey]);
 
+  // scene auto-advance
   useEffect(() => {
     if (view.line?.type === 'scene') dispatch({ type: AT.NEXT });
   }, [view.line?.type]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // anim effects + auto-advance
   useEffect(() => {
     if (view.line?.type !== 'anim') return;
     if (view.line.name === 'objection') {
@@ -1222,6 +1441,15 @@ export default function Page() {
     dispatch({ type: AT.NEXT });
   };
 
+  const onRecord = async () => {
+    if (!view.isCE) return;
+    await unlock();
+    await sfx('tap');
+    if (!typedDone) { typedSkip(); return; }
+    dispatch({ type: AT.RECORD });
+    doOverlay('증언을 기록했습니다.');
+  };
+
   const doPresent = async (key) => {
     await unlock();
     await sfx('flash');
@@ -1258,7 +1486,7 @@ export default function Page() {
       return;
     }
     if (!state.inv.includes(hit.result)) {
-      const inv = Array.from(new Set([...state.inv, hit.result]));
+      const inv = Array.from(new Set([...(state.inv || []), hit.result]));
       dispatch({ type: AT.HYDRATE, state: { ...state, inv } });
     }
     doOverlay(hit.successMsg || '새 단서를 얻었습니다.');
@@ -1269,16 +1497,42 @@ export default function Page() {
     if (!h?.resultEvidenceKey) return;
     const key = h.resultEvidenceKey;
     if (!state.inv.includes(key)) {
-      const inv = Array.from(new Set([...state.inv, key]));
+      const inv = Array.from(new Set([...(state.inv || []), key]));
       dispatch({ type: AT.HYDRATE, state: { ...state, inv } });
     }
     doOverlay(h.successMsg || '단서를 찾았습니다.');
     await sfx('tap');
   };
 
+  // Save metadata slots cache
+  const [slotsMeta, setSlotsMeta] = useState({});
+
+  const refreshSlotsMeta = () => {
+    const next = {};
+    for (const slot of [1, 2, 3]) {
+      const res = lsLoad(slot);
+      if (res.ok && res.data?.meta) next[slot] = res.data.meta;
+    }
+    setSlotsMeta(next);
+  };
+
+  useEffect(() => {
+    refreshSlotsMeta();
+  }, []);
+
   const onSave = async (slot) => {
-    const blob = { schema: 1, savedAt: new Date().toISOString(), state, combine: { a: combineA, b: combineB } };
+    const meta = {
+      savedAt: formatYYYYMMDDHHMM(new Date()),
+      chapterTitle: GAME_DB.meta.title,
+      snippet: snippetOf(`${view.speaker?.name || ''}: ${view.text}`, 40),
+    };
+    const blob = {
+      schema: 2,
+      meta,
+      state,
+    };
     const res = lsSave(slot, blob);
+    if (res.ok) refreshSlotsMeta();
     return { ok: res.ok, msg: res.ok ? `슬롯 ${slot} 저장 완료` : `저장 실패: ${res.reason}` };
   };
 
@@ -1287,13 +1541,12 @@ export default function Page() {
     if (!res.ok) return { ok: false, msg: `로드 실패: ${res.reason}` };
     const data = res.data;
     if (data?.state) dispatch({ type: AT.HYDRATE, state: data.state });
-    setCombineA(data?.combine?.a || null);
-    setCombineB(data?.combine?.b || null);
     return { ok: true, msg: `슬롯 ${slot} 로드 완료` };
   };
 
   const onDelete = async (slot) => {
     const res = lsDelete(slot);
+    if (res.ok) refreshSlotsMeta();
     return { ok: res.ok, msg: res.ok ? `슬롯 ${slot} 삭제 완료` : `삭제 실패: ${res.reason}` };
   };
 
@@ -1349,18 +1602,57 @@ export default function Page() {
             </Pill>
 
             <div className="flex items-center gap-2">
-              <button onClick={async () => { await unlock(); setSaveOpen(true); await sfx('tap'); }} className="w-11 h-11 rounded-full bg-black/45 border border-white/10 hover:border-white/20 backdrop-blur-md flex items-center justify-center" aria-label="save">
+              {/* Log button */}
+              <button
+                onClick={async () => {
+                  await unlock();
+                  await sfx('tap');
+                  setLogOpen(true);
+                }}
+                className="w-11 h-11 rounded-full bg-black/45 border border-white/10 hover:border-white/20 backdrop-blur-md flex items-center justify-center"
+                aria-label="log"
+              >
+                <ScrollText className="w-5 h-5 text-gray-200" />
+              </button>
+
+              <button
+                onClick={async () => {
+                  await unlock();
+                  setSaveOpen(true);
+                  await sfx('tap');
+                  refreshSlotsMeta();
+                }}
+                className="w-11 h-11 rounded-full bg-black/45 border border-white/10 hover:border-white/20 backdrop-blur-md flex items-center justify-center"
+                aria-label="save"
+              >
                 <Save className="w-5 h-5 text-gray-200" />
               </button>
 
-              <button onClick={async () => { await unlock(); setMuted((m) => !m); await sfx('tap'); }} className="w-11 h-11 rounded-full bg-black/45 border border-white/10 hover:border-white/20 backdrop-blur-md flex items-center justify-center" aria-label="mute">
+              <button
+                onClick={async () => {
+                  await unlock();
+                  setMuted((m) => !m);
+                  await sfx('tap');
+                }}
+                className="w-11 h-11 rounded-full bg-black/45 border border-white/10 hover:border-white/20 backdrop-blur-md flex items-center justify-center"
+                aria-label="mute"
+              >
                 {muted ? <VolumeX className="w-5 h-5 text-gray-200" /> : <Volume2 className="w-5 h-5 text-gray-200" />}
               </button>
 
-              <button onClick={async () => { await unlock(); setEvidenceOpen(true); dispatch({ type: AT.OPEN_EVIDENCE }); await sfx('tap'); }} className="h-11 px-4 rounded-full bg-black/45 border border-white/10 hover:border-white/20 backdrop-blur-md flex items-center gap-2" aria-label="evidence">
+              <button
+                onClick={async () => {
+                  await unlock();
+                  setEvidenceOpen(true);
+                  dispatch({ type: AT.OPEN_EVIDENCE });
+                  await sfx('tap');
+                }}
+                className="h-11 px-4 rounded-full bg-black/45 border border-white/10 hover:border-white/20 backdrop-blur-md flex items-center gap-2"
+                aria-label="evidence"
+              >
                 <FileText className="w-5 h-5 text-amber-300" />
                 <span className="text-sm font-semibold text-white" style={{ fontFamily: 'Inter, sans-serif' }}>
-                  {state.inv.length}/{Object.keys(game.evidence || {}).length}
+                  {state.inv.length}/{Object.keys(view.evidenceMap || {}).length}
                 </span>
               </button>
             </div>
@@ -1370,7 +1662,9 @@ export default function Page() {
         {view.isCE ? (
           <div className="px-4 mt-3">
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-emerald-400/40 bg-emerald-500/10 text-emerald-200 backdrop-blur-md neon-pulse">
-              <span className="text-[11px] font-black tracking-widest" style={{ fontFamily: 'Inter, sans-serif' }}>CROSS EXAMINATION</span>
+              <span className="text-[11px] font-black tracking-widest" style={{ fontFamily: 'Inter, sans-serif' }}>
+                CROSS EXAMINATION
+              </span>
               <span className="text-[11px] font-semibold" style={{ fontFamily: 'Inter, sans-serif' }}>
                 · {view.ceTitle} · {view.ceIndex + 1}/{view.ceTotal}
               </span>
@@ -1434,31 +1728,51 @@ export default function Page() {
                 {!typedDone ? <span className="inline-block w-2">▍</span> : null}
               </div>
 
-              {/* ✅ BUTTON ALIGN FIX HERE */}
+              {/* Buttons aligned */}
               <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex flex-wrap items-center gap-2">
                   {view.isCE ? (
-                    <button
-                      onClick={async (e) => {
-                        e.preventDefault(); e.stopPropagation();
-                        await unlock(); await sfx('tap');
-                        if (!typedDone) { typedSkip(); return; }
-                        dispatch({ type: AT.PRESS });
-                        if (view.stmt?.pressQ) doOverlay(view.stmt.pressQ);
-                      }}
-                      disabled={!pressable}
-                      className="h-11 px-4 rounded-xl bg-emerald-600/80 hover:bg-emerald-500 border border-emerald-400/30 font-semibold flex items-center gap-2 disabled:opacity-40"
-                      style={{ fontFamily: 'Inter, sans-serif' }}
-                    >
-                      <Search className="w-4 h-4" />
-                      추궁
-                    </button>
+                    <>
+                      <button
+                        onClick={async (e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          await unlock();
+                          await sfx('tap');
+                          if (!typedDone) { typedSkip(); return; }
+                          dispatch({ type: AT.PRESS });
+                          if (view.stmt?.pressQ) doOverlay(view.stmt.pressQ);
+                        }}
+                        disabled={!pressable}
+                        className="h-11 px-4 rounded-xl bg-emerald-600/80 hover:bg-emerald-500 border border-emerald-400/30 font-semibold flex items-center gap-2 disabled:opacity-40"
+                        style={{ fontFamily: 'Inter, sans-serif' }}
+                      >
+                        <Search className="w-4 h-4" />
+                        추궁
+                      </button>
+
+                      {/* Record */}
+                      <button
+                        onClick={async (e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          await onRecord();
+                        }}
+                        className="h-11 px-4 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-400/30 font-semibold flex items-center gap-2"
+                        style={{ fontFamily: 'Inter, sans-serif' }}
+                      >
+                        <Check className="w-4 h-4 text-emerald-200" />
+                        기록
+                      </button>
+                    </>
                   ) : null}
 
                   <button
                     onClick={async (e) => {
-                      e.preventDefault(); e.stopPropagation();
-                      await unlock(); await sfx('tap');
+                      e.preventDefault();
+                      e.stopPropagation();
+                      await unlock();
+                      await sfx('tap');
                       if (!typedDone) { typedSkip(); return; }
                       setEvidenceOpen(true);
                       dispatch({ type: AT.OPEN_EVIDENCE });
@@ -1472,8 +1786,10 @@ export default function Page() {
 
                   <button
                     onClick={async (e) => {
-                      e.preventDefault(); e.stopPropagation();
-                      await unlock(); await sfx('tap');
+                      e.preventDefault();
+                      e.stopPropagation();
+                      await unlock();
+                      await sfx('tap');
                       dispatch({ type: AT.RESET });
                       doOverlay('리셋했습니다.');
                     }}
@@ -1487,7 +1803,15 @@ export default function Page() {
 
                 <div className="flex items-center gap-2 justify-end">
                   <button
-                    onClick={async (e) => { e.preventDefault(); e.stopPropagation(); await onPrev(); }}
+                    onClick={async (e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (!canMove()) return;
+                      await unlock();
+                      await sfx('tap');
+                      if (!typedDone) { typedSkip(); return; }
+                      dispatch({ type: AT.PREV });
+                    }}
                     className="h-11 px-4 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold flex items-center gap-2"
                     style={{ fontFamily: 'Inter, sans-serif' }}
                   >
@@ -1496,7 +1820,15 @@ export default function Page() {
                   </button>
 
                   <button
-                    onClick={async (e) => { e.preventDefault(); e.stopPropagation(); await onNext(); }}
+                    onClick={async (e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (!canMove()) return;
+                      await unlock();
+                      await sfx('tap');
+                      if (!typedDone) { typedSkip(); return; }
+                      dispatch({ type: AT.NEXT });
+                    }}
                     className="h-11 px-5 rounded-xl bg-white text-black font-black flex items-center gap-2"
                     style={{ fontFamily: 'Inter, sans-serif' }}
                   >
@@ -1506,29 +1838,43 @@ export default function Page() {
                 </div>
               </div>
 
-              {view.hint ? <div className="mt-3 text-xs text-gray-400">{view.hint}</div> : null}
+              {view.hint ? <div className="mt-3 text-xs text-gray-400 whitespace-pre-wrap">{view.hint}</div> : null}
             </div>
           </div>
         </div>
       </div>
 
       {/* Modals */}
+      <LogModal open={logOpen} onClose={() => setLogOpen(false)} log={state.log} />
+
       <EvidenceModal
         open={evidenceOpen && state.evidenceOpen}
-        onClose={async () => { await unlock(); await sfx('tap'); setEvidenceOpen(false); dispatch({ type: AT.CLOSE_EVIDENCE }); }}
+        onClose={async () => {
+          await unlock();
+          await sfx('tap');
+          setEvidenceOpen(false);
+          dispatch({ type: AT.CLOSE_EVIDENCE });
+        }}
         inventory={state.inv}
-        evidenceMap={game.evidence}
+        evidenceMap={view.evidenceMap}
         hint={view.hint}
         onPresent={(key) => doPresent(key)}
-        onExamine={(key) => { setExamineKey(key); setExamineOpen(true); }}
+        onExamine={(key) => {
+          setExamineKey(key);
+          setExamineOpen(true);
+        }}
         onOpenCombine={() => setCombineOpen(true)}
       />
 
       <CombineModal
         open={combineOpen}
-        onClose={() => { setCombineOpen(false); setCombineA(null); setCombineB(null); }}
+        onClose={() => {
+          setCombineOpen(false);
+          setCombineA(null);
+          setCombineB(null);
+        }}
         inventory={state.inv}
-        evidenceMap={game.evidence}
+        evidenceMap={view.evidenceMap}
         a={combineA}
         b={combineB}
         onPickA={(k) => setCombineA(k)}
@@ -1538,19 +1884,23 @@ export default function Page() {
 
       <ExamineModal
         open={examineOpen}
-        onClose={() => { setExamineOpen(false); setExamineKey(null); }}
+        onClose={() => {
+          setExamineOpen(false);
+          setExamineKey(null);
+        }}
         evidenceKey={examineKey}
-        evidence={examineKey ? game.evidence[examineKey] : null}
+        evidence={examineKey ? view.evidenceMap?.[examineKey] : null}
         onFound={onHotspotFound}
       />
 
       <SaveLoadModal
         open={saveOpen}
         onClose={() => setSaveOpen(false)}
+        slotsMeta={slotsMeta}
         onSave={onSave}
         onLoad={onLoad}
         onDelete={onDelete}
       />
     </div>
   );
-                       }
+          }
