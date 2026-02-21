@@ -14,19 +14,24 @@ import {
   FolderOpen,
   Trash2,
   Save,
+  ChevronLeft,
 } from 'lucide-react';
 
 /* =========================================================
    app/page.js — SINGLE FILE (RUNNABLE)
-   FIXED:
-   - ✅ Pill is not defined: Pill 컴포넌트 추가
-   - ✅ 대사 "완전한 문장" 보정: 한국어 종결부호 자동 보정(… 남발 없음)
-   - ✅ 추론 없이 진행 방지:
-       - cross_exam 종료 조건: (1) 약점 해결 OR (2) evolveOnPress가 있는 문장 최소 1회 추궁 완료
-       - 해결 전에는 마지막에서 자동으로 ‘미해결 문장’으로 되돌림
-       - NEXT는 타이핑 중엔 스킵(완성), 완료 후에만 진행
-   - ✅ 클릭만으로 진행 없음: NEXT 버튼만 진행
-   - ✅ Typewriter + Blip(저지연 WebAudio Oscillator)
+   ✅ Added:
+   - Prev 버튼 (상태 스냅샷 기반 되감기)
+   - Prosecutor 말투 자연화(‘오차율 0%’ 삭제)
+   - Typewriter + Blip 유지
+   - Next/Prev:
+       - 타이핑 중이면 먼저 스킵(완성)
+       - 완료 상태에서만 실제 이동
+   ✅ Still:
+   - 클릭으로 자동 진행 없음 (버튼만)
+   - Cross Exam 탭(초록색)
+   - Press → evolveOnPress
+   - Evidence Present / Combine / Examine hotspot
+   - Save/Load
 ========================================================= */
 
 /* =========================
@@ -40,7 +45,6 @@ html,body{height:100%}
 .safe-top{padding-top:env(safe-area-inset-top)}
 .safe-bottom{padding-bottom:env(safe-area-inset-bottom)}
 .no-scrollbar::-webkit-scrollbar{width:0;height:0}
-
 @keyframes shake{0%,100%{transform:translate(0)}25%{transform:translate(-6px,3px)}75%{transform:translate(6px,-3px)}}
 .animate-shake{animation:shake .22s ease-in-out 3}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
@@ -61,20 +65,17 @@ function nowMs() {
 }
 
 function normalizeKoreanSentence(raw) {
-  // ✅ 완전한 문장화: '.' 강제 X, 한국어 종결부호를 자연스럽게 추가
   const s0 = String(raw ?? '').trim();
   if (!s0) return s0;
-
   const last = s0[s0.length - 1];
   if (['.', '!', '?', '…'].includes(last)) return s0;
   if (last === ')' || last === ']' || last === '"' || last === "'") return s0;
 
-  // 질문 추정
-  const q = /(\?|까|나요|습니까|죠)$/.test(s0);
-  if (q) return s0 + '?';
+  // 질문 패턴
+  if (/(까|나요|습니까|죠)$/.test(s0)) return s0 + '?';
 
-  // 평서/명령 종결
-  const endsLike =
+  // 종결 어미
+  if (
     s0.endsWith('다') ||
     s0.endsWith('요') ||
     s0.endsWith('죠') ||
@@ -84,11 +85,10 @@ function normalizeKoreanSentence(raw) {
     s0.endsWith('냐') ||
     s0.endsWith('까') ||
     s0.endsWith('습니다') ||
-    s0.endsWith('입니다');
-
-  if (endsLike) return s0 + '.';
-
-  // 기타: 마침표
+    s0.endsWith('입니다')
+  ) {
+    return s0 + '.';
+  }
   return s0 + '.';
 }
 
@@ -169,7 +169,6 @@ function useTypewriter(text, { enabled = true, cps = 34 } = {}) {
         rafRef.current = null;
         return;
       }
-
       rafRef.current = requestAnimationFrame(tick);
     };
 
@@ -253,7 +252,6 @@ function useAudioBus() {
   const bgmCurRef = useRef({ key: null, audio: null, cache: new Map() });
   const sfxPoolRef = useRef(new Map());
 
-  // WebAudio blip
   const ctxRef = useRef(null);
   const masterRef = useRef(null);
   const lastBlipRef = useRef(0);
@@ -394,7 +392,7 @@ function preloadImage(url) {
 }
 
 /* =========================
-   6) GAME_DB
+   6) GAME_DB (Prosecutor dialogue fixed)
 ========================= */
 const GAME_DB = {
   meta: { title: '에피소드 1: 단선된 진실', description: '로그와 분류가 진실을 가장한다. 첫 재판에서 그 착각을 부순다.' },
@@ -482,9 +480,12 @@ const GAME_DB = {
       initialEvidence: ['autopsy', 'smartwatch_data', 'server_log', 'server_blade', 'voice_print', 'hall_cctv'],
       script: [
         { type: 'scene', bgKey: 'court', bgmKey: 'trial' },
-        { type: 'talk', charKey: 'judge', text: '지금부터 재판을 시작하겠습니다. 핵심만 말하세요.' },
-        { type: 'talk', charKey: 'prosecutor', text: '오차율 0%입니다. 21:00에 밀실 서버실에서 타격이 발생했습니다.' },
-        { type: 'talk', charKey: 'player', text: '그 확정이 입증인지부터 따져 보겠습니다.' },
+
+        { type: 'talk', charKey: 'judge', text: '지금부터 재판을 시작하겠습니다. 핵심만 말하세요' },
+
+        // ✅ Prosecutor natural
+        { type: 'talk', charKey: 'prosecutor', text: '정리부터 하죠. 21시. 서버실. 한 번의 타격. 그게 결론입니다' },
+        { type: 'talk', charKey: 'player', text: '결론부터 박아두면, 진실이 숨을 곳이 생깁니다. 숨을 못 쉬게 하죠' },
 
         { type: 'anim', name: 'cross_start' },
         {
@@ -493,49 +494,52 @@ const GAME_DB = {
           witnessCharKey: 'witness1',
           bgKey: 'hall',
           statements: [
-            { id: 'w1_01', text: '21:00 정각에 누군가 서버실 쪽에서 튀어나오는 것을 봤습니다.' },
-
-            // ✅ latentWeak: evolveOnPress가 반드시 필요하도록 설계
+            { id: 'w1_01', text: '21:00 정각에 누군가 서버실 쪽에서 튀어나오는 것을 봤습니다' },
             {
               id: 'w1_02',
-              text: '문이 열려 있었기 때문에, 나왔다고 확신했습니다.',
-              pressQ: '문이 열렸다는 근거가 있나요?',
+              text: '문이 열려 있었기 때문에, 나왔다고 확신했습니다',
+              pressQ: '문이 열렸다는 근거가 있나요',
               press: [
-                { charKey: 'player', text: '도어락 기록은 확인했나요?' },
-                { charKey: 'witness1', face: 'sweat', text: '그건 나중에 들었습니다. 그때는 그냥 제 눈으로 봤습니다.' },
+                { charKey: 'player', text: '도어락 기록은 확인했나요' },
+                { charKey: 'witness1', face: 'sweat', text: '그때는 몰랐습니다. 저는 그냥 눈으로 봤습니다' },
               ],
               evolveOnPress: {
-                newText: '문이 열렸다고 생각했지만, 도어락 로그를 보니 열림 기록이 없었다고 들었습니다.',
+                newText: '문이 열렸다고 생각했지만, 도어락 로그를 보니 열림 기록이 없었다고 들었습니다',
                 weakness: true,
                 contradictionEvidenceKey: 'server_log',
-                failMsg: '도어락 로그를 제시해서, 문이 열리지 않았음을 입증하라.',
+                failMsg: '도어락 로그를 제시해서, 문이 열리지 않았음을 입증하라',
               },
             },
           ],
         },
 
         { type: 'anim', name: 'objection' },
-        { type: 'talk', charKey: 'player', text: '이의 있습니다. 20:55부터 21:05까지 도어락은 열림 이벤트가 없습니다.' },
-        { type: 'talk', charKey: 'prosecutor', text: '그렇다면 사망 시각이 중요해집니다. 사망 시각은 21:00입니다.' },
+        { type: 'talk', charKey: 'player', text: '이의 있습니다. 20:55부터 21:05까지, 열림 이벤트가 없습니다' },
+
+        // ✅ Prosecutor natural retort
+        { type: 'talk', charKey: 'prosecutor', text: '좋아요. 그럼 더 단순해지네요. 안 나갔다면, 안에서 죽였겠죠' },
+        { type: 'talk', charKey: 'player', text: '그 단순함이 제일 위험하죠. 시간부터 다시 봅시다' },
 
         { type: 'anim', name: 'cross_start' },
         {
           type: 'trial',
-          title: '류시온의 팩트 선언',
+          title: '류시온의 주장: 사망 시각',
           witnessCharKey: 'prosecutor',
           bgKey: 'tense',
           statements: [
             {
               id: 'p_01',
-              text: '부검 소견서가 21:00을 가리킵니다. 결론은 단순합니다.',
+              text: '부검은 21시를 가리킵니다. 그 이상도 이하도 아닙니다',
               weakness: true,
               contradictionEvidenceKey: 'real_time_of_death',
-              failMsg: '부검과 스마트워치를 조합해 진짜 사망 시각을 만든 뒤 제시하라.',
+              failMsg: '부검과 스마트워치를 조합해 진짜 사망 시각을 만든 뒤 제시하라',
             },
           ],
         },
 
-        { type: 'talk', charKey: 'player', text: '선이 연결됐습니다. 심정지는 20:45입니다.' },
+        { type: 'talk', charKey: 'player', text: '선이 연결됐습니다. 심정지는 20:45입니다' },
+        { type: 'talk', charKey: 'prosecutor', text: '…그래서요. 21시에 때린 게 아니라는 말입니까' },
+        { type: 'talk', charKey: 'player', text: '네. 21시는 사후입니다. 위장일 가능성이 생겼습니다' },
 
         { type: 'anim', name: 'cross_start' },
         {
@@ -546,23 +550,25 @@ const GAME_DB = {
           statements: [
             {
               id: 'w2_01',
-              text: '블레이드에 피가 있습니다. 그러니 살인입니다.',
-              pressQ: '피가 곧 살인인가요?',
+              text: '블레이드에 피가 있습니다. 그럼 살인입니다. 더 볼 게 없어요',
+              pressQ: '피가 있으면 무조건 살인인가요',
               press: [
-                { charKey: 'player', text: '끝부분 변색은 확인했나요?' },
-                { charKey: 'witness2', face: 'sweat', text: '그런 건 중요하지 않습니다. 피가 더 중요합니다.' },
+                { charKey: 'player', text: '끝부분 변색은 확인했나요' },
+                { charKey: 'witness2', face: 'sweat', text: '그런 건 중요하지 않습니다. 피가 먼저죠' },
               ],
               evolveOnPress: {
-                newText: '피가 묻은 흉기면 충분합니다. 다른 해석은 변명입니다.',
+                newText: '피가 묻은 흉기면 충분합니다. 다른 해석은 변명입니다',
                 weakness: true,
                 contradictionEvidenceKey: 'staged_accident',
-                failMsg: '탄 자국과 사망 시각을 조합해 감전사 위장 정황을 만든 뒤 제시하라.',
+                failMsg: '탄 자국과 사망 시각을 조합해 감전사 위장 정황을 만든 뒤 제시하라',
               },
             },
           ],
         },
 
-        { type: 'talk', charKey: 'player', text: '이 사건의 본질은 살인이 아니라 감전사입니다.' },
+        { type: 'talk', charKey: 'player', text: '이 사건의 본질은 살인이 아니라 감전사입니다' },
+        { type: 'talk', charKey: 'prosecutor', text: '감전사라… 그러면 흉기는 왜 남겼죠' },
+        { type: 'talk', charKey: 'player', text: '위장입니다. 겁을 먹였든, 시선을 돌렸든요' },
 
         { type: 'anim', name: 'cross_start' },
         {
@@ -573,25 +579,25 @@ const GAME_DB = {
           statements: [
             {
               id: 'w3_01',
-              text: '20:59의 음성은 윤비서로 분류되었습니다.',
-              pressQ: '윤비서는 20:45에 사망했습니다. 어떻게 가능한가요?',
+              text: '20:59의 음성은 윤비서로 분류되었습니다',
+              pressQ: '윤비서는 20:45에 사망했습니다. 어떻게 가능한가요',
               press: [
-                { charKey: 'player', text: '분류가 틀렸을 가능성은 없나요?' },
-                { charKey: 'witness3', face: 'sweat', text: '프레임이 깨지면 분류가 흔들릴 수는 있습니다.' },
+                { charKey: 'player', text: '분류가 틀릴 가능성은 없나요' },
+                { charKey: 'witness3', face: 'sweat', text: '프레임이 깨지면 흔들릴 수는 있습니다' },
               ],
               evolveOnPress: {
-                newText: '프레임 드롭 구간이면 음성 분류는 오탐이 발생할 수 있습니다.',
+                newText: '프레임 드롭 구간이면 음성 분류는 오탐이 발생할 수 있습니다',
                 weakness: true,
                 contradictionEvidenceKey: 'evolved_voice_log',
-                failMsg: '음성 로그와 CCTV를 조합해 분류 조작 정황을 만든 뒤 제시하라.',
+                failMsg: '음성 로그와 CCTV를 조합해 분류 조작 정황을 만든 뒤 제시하라',
               },
             },
           ],
         },
 
-        { type: 'talk', charKey: 'judge', text: '피고인에게 무죄를 선고합니다.' },
+        { type: 'talk', charKey: 'judge', text: '피고인에게 무죄를 선고합니다' },
         { type: 'scene', bgKey: 'ending', bgmKey: 'victory' },
-        { type: 'talk', charKey: 'player', text: '선이 끊긴 게 아니라, 누군가 끊어 놓은 겁니다.' },
+        { type: 'talk', charKey: 'player', text: '선이 끊긴 게 아니라, 누가 끊어 놓은 겁니다' },
         { type: 'end', text: 'THE END' },
       ],
     },
@@ -599,7 +605,7 @@ const GAME_DB = {
 };
 
 /* =========================
-   7) Compile DSL → runtime
+   7) Compile
 ========================= */
 function compileGame(db) {
   const baseCase = db.cases?.[0];
@@ -681,17 +687,19 @@ function compileGame(db) {
 }
 
 /* =========================
-   8) State + Reducer
+   8) Reducer + History (Prev)
 ========================= */
 const AT = {
   RESET: 'RESET',
   NEXT: 'NEXT',
+  PREV: 'PREV',
   PRESS: 'PRESS',
   PRESS_NEXT: 'PRESS_NEXT',
   PRESENT: 'PRESENT',
   OPEN_EVIDENCE: 'OPEN_EVIDENCE',
   CLOSE_EVIDENCE: 'CLOSE_EVIDENCE',
   HYDRATE: 'HYDRATE',
+  PUSH_HISTORY: 'PUSH_HISTORY',
 };
 
 function initialState(game) {
@@ -705,43 +713,56 @@ function initialState(game) {
     pressMode: false,
     pressIndex: 0,
     evidenceOpen: false,
-    evolved: {}, // stmtId -> {text, weakness, contradictionEvidenceKey, failMsg}
+    evolved: {},
     ending: false,
     gameOver: false,
+    // ✅ history snapshots for Prev
+    history: [],
   };
+}
+
+function stripHistory(s) {
+  const { history, ...rest } = s;
+  return rest;
 }
 
 function reducer(game, state, action) {
   const lines = game.lines || [];
   const line = lines[state.idx];
 
-  const getMergedStatementAt = (i) => {
-    if (!line || line.type !== 'cross_exam') return null;
-    const s = line.statements?.[i] || null;
-    if (!s) return null;
-    const ev = state.evolved?.[s.id];
-    return ev ? { ...s, ...ev } : s;
+  const getMergedStatementAt = (i, st) => {
+    const L = lines[st.idx];
+    if (!L || L.type !== 'cross_exam') return null;
+    const s0 = L.statements?.[i] || null;
+    if (!s0) return null;
+    const ev = st.evolved?.[s0.id];
+    return ev ? { ...s0, ...ev } : s0;
   };
 
-  const getStatement = () => getMergedStatementAt(state.ceIndex);
-
-  const findUnresolvedIndex = () => {
-    // ✅ 추론 없이 진행 방지:
-    // 1) weakness가 있는 문장(제시해야 함)
-    // 2) evolveOnPress가 있는데 아직 evolve되지 않은 문장(추궁이 필요)
-    if (!line || line.type !== 'cross_exam') return -1;
-    const stmts = line.statements || [];
+  const findUnresolvedIndex = (st) => {
+    const L = lines[st.idx];
+    if (!L || L.type !== 'cross_exam') return -1;
+    const stmts = L.statements || [];
     for (let i = 0; i < stmts.length; i++) {
       const base = stmts[i];
-      const merged = getMergedStatementAt(i);
-      const evolved = !!state.evolved?.[base.id];
+      const merged = getMergedStatementAt(i, st);
+      const evolved = !!st.evolved?.[base.id];
       const hasEvolve = !!base.evolveOnPress;
       const isWeak = !!merged?.weakness;
-
-      if (isWeak) return i;                 // evidence presentation required
-      if (hasEvolve && !evolved) return i;  // press required
+      if (isWeak) return i;
+      if (hasEvolve && !evolved) return i;
     }
     return -1;
+  };
+
+  const pushHistoryIfMove = (nextState) => {
+    // history에는 “이동 전 상태”를 넣는다
+    const snap = stripHistory(state);
+    const hist = state.history ? state.history.slice() : [];
+    hist.push(snap);
+    // 히스토리 너무 커지는 것 방지(200)
+    if (hist.length > 200) hist.shift();
+    return { ...nextState, history: hist };
   };
 
   switch (action.type) {
@@ -758,21 +779,22 @@ function reducer(game, state, action) {
 
     case AT.PRESS: {
       if (!line || line.type !== 'cross_exam') return state;
-      const s = getStatement();
+      const s = getMergedStatementAt(state.ceIndex, state);
       if (!s?.press?.length) return state;
-      return { ...state, pressMode: true, pressIndex: 0 };
+      return pushHistoryIfMove({ ...state, pressMode: true, pressIndex: 0 });
     }
 
     case AT.PRESS_NEXT: {
       if (!state.pressMode) return state;
-      const s = getStatement();
+      const s = getMergedStatementAt(state.ceIndex, state);
       const n = s?.press?.length || 0;
-      if (n <= 0) return { ...state, pressMode: false, pressIndex: 0 };
+      if (n <= 0) return pushHistoryIfMove({ ...state, pressMode: false, pressIndex: 0 });
 
       const last = state.pressIndex >= n - 1;
-      if (!last) return { ...state, pressIndex: state.pressIndex + 1 };
+      if (!last) return pushHistoryIfMove({ ...state, pressIndex: state.pressIndex + 1 });
 
-      const base = line?.statements?.[state.ceIndex];
+      const L = lines[state.idx];
+      const base = L?.statements?.[state.ceIndex];
       const evo = s?.evolveOnPress;
       if (base && evo) {
         const nextEvolved = { ...(state.evolved || {}) };
@@ -782,14 +804,14 @@ function reducer(game, state, action) {
           contradictionEvidenceKey: evo.contradictionEvidenceKey,
           failMsg: evo.failMsg,
         };
-        return { ...state, evolved: nextEvolved, pressMode: false, pressIndex: 0 };
+        return pushHistoryIfMove({ ...state, evolved: nextEvolved, pressMode: false, pressIndex: 0 });
       }
-      return { ...state, pressMode: false, pressIndex: 0 };
+      return pushHistoryIfMove({ ...state, pressMode: false, pressIndex: 0 });
     }
 
     case AT.PRESENT: {
       if (!line || line.type !== 'cross_exam') return state;
-      const s = getStatement();
+      const s = getMergedStatementAt(state.ceIndex, state);
       if (!s) return state;
 
       const isWeak = !!s.weakness;
@@ -797,10 +819,11 @@ function reducer(game, state, action) {
       const presented = action.key;
 
       if (isWeak && correctKey && presented === correctKey) {
-        // ✅ solve weakness -> clear this weakness by removing evolved weakness flag (if evolved) or just mark solved by stripping weakness
-        // simplest: remove evolved entry entirely if it came from evolve; otherwise keep and just clear weakness
-        const base = line?.statements?.[state.ceIndex];
-        let evolvedNext = { ...(state.evolved || {}) };
+        // clear weakness in evolved entry if present
+        const L = lines[state.idx];
+        const base = L?.statements?.[state.ceIndex];
+        const evolvedNext = { ...(state.evolved || {}) };
+
         if (base?.id && evolvedNext[base.id]) {
           const keep = { ...evolvedNext[base.id] };
           delete keep.weakness;
@@ -809,44 +832,24 @@ function reducer(game, state, action) {
           evolvedNext[base.id] = keep;
         }
 
-        // after solve, check if more unresolved remain; if yes, jump to next unresolved within same cross
-        const tmpState = { ...state, evolved: evolvedNext, pressMode: false, pressIndex: 0, evidenceOpen: false };
-        const unresolvedIdx = (() => {
-          const stmts = line.statements || [];
-          for (let i = 0; i < stmts.length; i++) {
-            const base2 = stmts[i];
-            const merged = (() => {
-              const s0 = stmts[i];
-              const ev2 = tmpState.evolved?.[s0.id];
-              return ev2 ? { ...s0, ...ev2 } : s0;
-            })();
-            const evolved = !!tmpState.evolved?.[base2.id];
-            const hasEvolve = !!base2.evolveOnPress;
-            const isWeak2 = !!merged?.weakness;
-            if (isWeak2) return i;
-            if (hasEvolve && !evolved) return i;
-          }
-          return -1;
-        })();
+        const tmp = { ...state, evolved: evolvedNext, pressMode: false, pressIndex: 0, evidenceOpen: false };
+        const unresolved = findUnresolvedIndex(tmp);
 
-        if (unresolvedIdx >= 0) {
-          return { ...tmpState, ceIndex: unresolvedIdx };
+        if (unresolved >= 0) {
+          return pushHistoryIfMove({ ...tmp, ceIndex: unresolved });
         }
 
-        // all resolved -> advance to next line
         const nextIdx = clamp(state.idx + 1, 0, lines.length - 1);
         const nextLine = lines[nextIdx];
-        return { ...tmpState, idx: nextIdx, bgKey: nextLine?.bgKey || tmpState.bgKey, ceIndex: 0 };
+        return pushHistoryIfMove({ ...tmp, idx: nextIdx, bgKey: nextLine?.bgKey || tmp.bgKey, ceIndex: 0 });
       }
 
-      // wrong
       const hp = Math.max(0, state.hp - 1);
-      return { ...state, hp, gameOver: hp <= 0 };
+      return pushHistoryIfMove({ ...state, hp, gameOver: hp <= 0 });
     }
 
     case AT.NEXT: {
       if (state.ending || state.gameOver) return state;
-
       if (state.pressMode) return reducer(game, state, { type: AT.PRESS_NEXT });
 
       if (!line) return state;
@@ -854,38 +857,41 @@ function reducer(game, state, action) {
       if (line.type === 'scene' || line.type === 'anim') {
         const nextIdx = clamp(state.idx + 1, 0, lines.length - 1);
         const nextLine = lines[nextIdx];
-        return { ...state, idx: nextIdx, bgKey: nextLine?.bgKey || state.bgKey };
+        return pushHistoryIfMove({ ...state, idx: nextIdx, bgKey: nextLine?.bgKey || state.bgKey });
       }
 
-      if (line.type === 'end') return { ...state, ending: true };
+      if (line.type === 'end') return pushHistoryIfMove({ ...state, ending: true });
 
       if (line.type === 'cross_exam') {
         const total = line.statements?.length || 0;
-        if (total <= 0) {
-          const nextIdx = clamp(state.idx + 1, 0, lines.length - 1);
-          const nextLine = lines[nextIdx];
-          return { ...state, idx: nextIdx, bgKey: nextLine?.bgKey || state.bgKey, ceIndex: 0 };
-        }
-
         const last = state.ceIndex >= total - 1;
+
         if (last) {
-          const unresolved = findUnresolvedIndex();
+          const unresolved = findUnresolvedIndex(state);
           if (unresolved >= 0) {
-            // ✅ block progression
-            return { ...state, ceIndex: unresolved };
+            return pushHistoryIfMove({ ...state, ceIndex: unresolved });
           }
           const nextIdx = clamp(state.idx + 1, 0, lines.length - 1);
           const nextLine = lines[nextIdx];
-          return { ...state, idx: nextIdx, bgKey: nextLine?.bgKey || state.bgKey, ceIndex: 0 };
+          return pushHistoryIfMove({ ...state, idx: nextIdx, bgKey: nextLine?.bgKey || state.bgKey, ceIndex: 0 });
         }
 
-        return { ...state, ceIndex: state.ceIndex + 1 };
+        return pushHistoryIfMove({ ...state, ceIndex: state.ceIndex + 1 });
       }
 
       // talk
       const nextIdx = clamp(state.idx + 1, 0, lines.length - 1);
       const nextLine = lines[nextIdx];
-      return { ...state, idx: nextIdx, bgKey: nextLine?.bgKey || state.bgKey };
+      return pushHistoryIfMove({ ...state, idx: nextIdx, bgKey: nextLine?.bgKey || state.bgKey });
+    }
+
+    case AT.PREV: {
+      // ✅ 되감기: history가 있으면 마지막 스냅샷 복원
+      const hist = state.history || [];
+      if (hist.length <= 0) return state;
+      const prevSnap = hist[hist.length - 1];
+      const nextHist = hist.slice(0, -1);
+      return { ...prevSnap, history: nextHist };
     }
 
     default:
@@ -935,11 +941,8 @@ function deriveView(game, state) {
 
   const hint = (() => {
     if (!isCE) return '';
-    // if not evolved but has evolveOnPress -> hint "추궁 필요"
-    const baseStmt = stmt0;
-    const evolved = baseStmt ? !!state.evolved?.[baseStmt.id] : false;
-    const hasEvolve = !!baseStmt?.evolveOnPress;
-
+    const evolved = stmt0 ? !!state.evolved?.[stmt0.id] : false;
+    const hasEvolve = !!stmt0?.evolveOnPress;
     if (hasEvolve && !evolved) return '이 문장은 추궁해서 증언을 갱신해야 한다.';
     if (stmt?.weakness) return stmt?.failMsg || '이 문장은 약점이다. 증거를 제시하라.';
     return '';
@@ -971,12 +974,8 @@ function findCombination(combos, a, b) {
 }
 
 /* =========================
-   11) UI bits
+   11) UI
 ========================= */
-function Pill({ children }) {
-  return <div className="px-4 py-2 rounded-full border border-white/10 bg-black/45 backdrop-blur-md">{children}</div>;
-}
-
 function ModalShell({ open, onClose, title, icon, children, footer }) {
   if (!open) return null;
   return (
@@ -1237,7 +1236,6 @@ export default function Page() {
   const [state, dispatch] = useReducer((s, a) => reducer(game, s, a), undefined, () => initialState(game));
   const view = useMemo(() => deriveView(game, state), [game, state]);
 
-  // UI
   const [muted, setMuted] = useState(false);
   const [bgUrl, setBgUrl] = useState(null);
   const [evidenceOpen, setEvidenceOpen] = useState(false);
@@ -1259,20 +1257,14 @@ export default function Page() {
   const doOverlay = (t, ms = 1000) => (setOverlayMsg(t), setTimeout(() => setOverlayMsg(null), ms));
   const doEffect = (t, ms = 850) => (setEffectText(t), setTimeout(() => setEffectText(null), ms));
 
-  // next debounce
-  const lastNextRef = useRef(0);
-  const canNext = () => {
+  // debounce both next/prev
+  const lastMoveRef = useRef(0);
+  const canMove = () => {
     const t = nowMs();
-    if (t - lastNextRef.current < 250) return false;
-    lastNextRef.current = t;
+    if (t - lastMoveRef.current < 250) return false;
+    lastMoveRef.current = t;
     return true;
   };
-
-  // optional bg image
-  useEffect(() => {
-    const candidate = `/assets/bg/${view.bgKey}.webp`;
-    preloadImage(candidate).then((ok) => setBgUrl(ok ? candidate : null));
-  }, [view.bgKey]);
 
   useEffect(() => {
     audio.setMuted(muted).catch(() => {});
@@ -1285,6 +1277,12 @@ export default function Page() {
     const url = `/assets/sfx/${k}.ogg`;
     await audio.playSfx(k, url).catch(() => {});
   };
+
+  // optional bg image
+  useEffect(() => {
+    const candidate = `/assets/bg/${view.bgKey}.webp`;
+    preloadImage(candidate).then((ok) => setBgUrl(ok ? candidate : null));
+  }, [view.bgKey]);
 
   // auto-advance scene
   useEffect(() => {
@@ -1321,16 +1319,21 @@ export default function Page() {
     lastLenRef.current = curLen;
   }, [typedText, typedDone, view.isCE]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // NEXT handler: typing -> skip, else advance
-  const onNext = async () => {
-    if (!canNext()) return;
+  const bgStyle = bgUrl ? { backgroundImage: `url(${bgUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined;
+
+  const onPrev = async () => {
+    if (!canMove()) return;
     await unlock();
     await sfx('tap');
+    if (!typedDone) { typedSkip(); return; }
+    dispatch({ type: AT.PREV });
+  };
 
-    if (!typedDone) {
-      typedSkip();
-      return;
-    }
+  const onNext = async () => {
+    if (!canMove()) return;
+    await unlock();
+    await sfx('tap');
+    if (!typedDone) { typedSkip(); return; }
     dispatch({ type: AT.NEXT });
   };
 
@@ -1340,15 +1343,14 @@ export default function Page() {
     doFlash();
     const prevHp = state.hp;
     dispatch({ type: AT.PRESENT, key });
-
     setTimeout(async () => {
       if (state.hp < prevHp) {
         doShake();
-        doOverlay('틀렸다.');
+        doOverlay('틀렸습니다.');
         await sfx('fail');
       } else {
         doEffect('OBJECTION!');
-        doOverlay('모순이다.');
+        doOverlay('모순입니다.');
         await sfx('objection');
       }
     }, 80);
@@ -1358,7 +1360,7 @@ export default function Page() {
     const a = combineA;
     const b = combineB;
     if (!a || !b) {
-      doOverlay('두 개를 골라라.');
+      doOverlay('두 개를 골라야 합니다.');
       return;
     }
     const hit = findCombination(game.combinations, a, b);
@@ -1367,14 +1369,14 @@ export default function Page() {
     setCombineB(null);
 
     if (!hit) {
-      doOverlay('아무 일도 없다.');
+      doOverlay('조합 결과가 없습니다.');
       return;
     }
     if (!state.inv.includes(hit.result)) {
       const inv = Array.from(new Set([...state.inv, hit.result]));
       dispatch({ type: AT.HYDRATE, state: { ...state, inv } });
     }
-    doOverlay(hit.successMsg || '새 단서를 얻었다.');
+    doOverlay(hit.successMsg || '새 단서를 얻었습니다.');
     await sfx('tap');
   };
 
@@ -1385,7 +1387,7 @@ export default function Page() {
       const inv = Array.from(new Set([...state.inv, key]));
       dispatch({ type: AT.HYDRATE, state: { ...state, inv } });
     }
-    doOverlay(h.successMsg || '단서를 찾았다.');
+    doOverlay(h.successMsg || '단서를 찾았습니다.');
     await sfx('tap');
   };
 
@@ -1409,9 +1411,6 @@ export default function Page() {
     return { ok: res.ok, msg: res.ok ? `슬롯 ${slot} 삭제 완료` : `삭제 실패: ${res.reason}` };
   };
 
-  const bgStyle = bgUrl ? { backgroundImage: `url(${bgUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined;
-
-  // simple ending/gameover screens
   if (state.gameOver) {
     return (
       <div className={`min-h-screen ${GAME_DB.backgrounds.gameover} text-white flex items-center justify-center p-6`} style={bgStyle}>
@@ -1609,9 +1608,19 @@ export default function Page() {
                   리셋
                 </button>
 
+                {/* ✅ Prev/Next */}
+                <button
+                  onClick={async (e) => { e.preventDefault(); e.stopPropagation(); await onPrev(); }}
+                  className="ml-auto px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold flex items-center gap-2"
+                  style={{ fontFamily: 'Inter, sans-serif' }}
+                >
+                  <ChevronLeft className="w-5 h-5" />
+                  이전
+                </button>
+
                 <button
                   onClick={async (e) => { e.preventDefault(); e.stopPropagation(); await onNext(); }}
-                  className="ml-auto px-5 py-2 rounded-xl bg-white text-black font-black flex items-center gap-2"
+                  className="px-5 py-2 rounded-xl bg-white text-black font-black flex items-center gap-2"
                   style={{ fontFamily: 'Inter, sans-serif' }}
                 >
                   다음
@@ -1665,4 +1674,4 @@ export default function Page() {
       />
     </div>
   );
-              }
+    }
