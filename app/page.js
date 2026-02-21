@@ -13,21 +13,24 @@ import {
   HardDrive,
   FolderOpen,
   Trash2,
-  ShieldAlert,
   Save,
 } from 'lucide-react';
 
 /* =========================================================
    app/page.js — SINGLE FILE (RUNNABLE)
-   FIXES:
-   - ✅ "클릭만 해도 계속 넘어감" 방지:
-     - 대화 박스 전체 클릭 제거
-     - 오른쪽 아래 "다음" 버튼만 진행
-     - 버튼 연타 디바운스(250ms)
-   - ✅ 역전재판 느낌: 심문 시작 탭 + 초록색 텍스트/라벨
-   - ✅ 말투: 마침표 남발 제거 + 한국어 종결 보정(자연스러운 마무리)
-   - ✅ Press → evolveOnPress / Evidence Examine(hotspot) / Combine / SaveLoad
-   - ✅ 런타임 에러 오버레이 포함
+   ✅ Added:
+   - Typewriter effect (useTypewriter)
+   - Blip sound while typing (WebAudio oscillator, low-latency)
+   - NEXT button behavior:
+       - if typing -> reveal full text (skip)
+       - else -> advance
+   ✅ Still:
+   - click-to-advance disabled (only NEXT button)
+   - cross tab green
+   - Press -> evolveOnPress
+   - Evidence Present / Combine / Examine hotspot
+   - Save/Load 3 slots
+   - Error overlay
 ========================================================= */
 
 /* =========================
@@ -48,8 +51,7 @@ html,body{height:100%}
 .animate-fade-in{animation:fadeIn .25s ease-out}
 @keyframes slideUp{from{transform:translateY(18px);opacity:0}to{transform:translateY(0);opacity:1}}
 .animate-slide-up{animation:slideUp .28s cubic-bezier(.16,1,.3,1)}
-
-@keyframes neonPulse{0%,100%{opacity:.7;transform:translateY(0)}50%{opacity:1;transform:translateY(-1px)}}
+@keyframes neonPulse{0%,100%{opacity:.75;transform:translateY(0)}50%{opacity:1;transform:translateY(-1px)}}
 .neon-pulse{animation:neonPulse 1.25s ease-in-out infinite}
 `;
 
@@ -65,59 +67,32 @@ function nowMs() {
 }
 
 function normalizeKoreanEnding(raw) {
-  // ✅ "기계적 마침표" 제거: 문장 끝 '.' 강제 X
-  // ✅ 이미 종결부호가 있으면 유지
-  // ✅ 종결부호가 없다면 한국어 어미 기반으로 자연스럽게 마무리(너무 과장 안 함)
   const s0 = String(raw ?? '').trim();
   if (!s0) return s0;
-
-  // 이미 종결 부호가 있으면 그대로
   const last = s0[s0.length - 1];
   if (['.', '!', '?', '…'].includes(last)) return s0;
-
-  // 괄호/인용으로 끝나면 그대로
   if (last === ')' || last === ']' || last === '"' || last === "'") return s0;
 
-  // 한국어 종결 어미로 끝나는지(대략)
-  const end2 = s0.slice(-2);
-  const end3 = s0.slice(-3);
-
-  const endsLikeStatement =
+  const endsLike =
     s0.endsWith('다') ||
     s0.endsWith('요') ||
     s0.endsWith('죠') ||
     s0.endsWith('네') ||
-    s0.endsWith('임') ||
-    s0.endsWith('함') ||
-    s0.endsWith('지') ||
-    s0.endsWith('래') ||
     s0.endsWith('냐') ||
     s0.endsWith('까') ||
     s0.endsWith('라') ||
     s0.endsWith('자') ||
-    end2 === '다.' ||
-    end2 === '요.' ||
-    end2 === '죠.' ||
-    end2 === '네.' ||
-    end2 === '까.' ||
-    end2 === '냐.' ||
-    end3 === '습니다';
+    s0.endsWith('임') ||
+    s0.endsWith('함') ||
+    s0.endsWith('지') ||
+    s0.endsWith('래') ||
+    s0.endsWith('습니다');
 
-  if (endsLikeStatement) return s0;
-
-  // 영어/숫자/코드 느낌이면 마침표 하나만
+  if (endsLike) return s0;
   const hasHangul = /[가-힣]/.test(s0);
   if (!hasHangul) return s0 + '.';
-
-  // 기본: 짧게 마무리
   return s0 + '…';
 }
-
-/* =========================
-   2) LocalStorage Save
-========================= */
-const SAVE_NS = 'ACEVN_GAME_DB_SAVE';
-const saveKey = (slot) => `${SAVE_NS}::slot::${slot}`;
 
 function safeJSONParse(s, fb = null) {
   try {
@@ -126,6 +101,101 @@ function safeJSONParse(s, fb = null) {
     return fb;
   }
 }
+
+/* =========================
+   2) Typewriter Hook
+========================= */
+function useTypewriter(text, {
+  enabled = true,
+  cps = 30,            // chars per second
+  instantOnEmpty = true
+} = {}) {
+  const full = String(text ?? '');
+  const [shown, setShown] = useState('');
+  const [done, setDone] = useState(true);
+
+  const idxRef = useRef(0);
+  const rafRef = useRef(null);
+  const lastRef = useRef(0);
+
+  const stop = () => {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+  };
+
+  const skip = () => {
+    stop();
+    idxRef.current = full.length;
+    setShown(full);
+    setDone(true);
+  };
+
+  useEffect(() => {
+    stop();
+    if (!enabled) {
+      setShown(full);
+      setDone(true);
+      idxRef.current = full.length;
+      return;
+    }
+    if (!full) {
+      if (instantOnEmpty) {
+        setShown('');
+        setDone(true);
+      } else {
+        setShown('');
+        setDone(false);
+      }
+      idxRef.current = 0;
+      return;
+    }
+
+    setShown('');
+    setDone(false);
+    idxRef.current = 0;
+    lastRef.current = performance.now();
+
+    const tick = (t) => {
+      const last = lastRef.current || t;
+      const dt = Math.max(0, t - last);
+      lastRef.current = t;
+
+      const add = (dt / 1000) * cps;
+      const next = Math.min(full.length, idxRef.current + add);
+      const nextInt = Math.floor(next);
+
+      if (nextInt !== Math.floor(idxRef.current)) {
+        idxRef.current = nextInt;
+        setShown(full.slice(0, nextInt));
+      } else {
+        idxRef.current = next;
+      }
+
+      if (idxRef.current >= full.length) {
+        idxRef.current = full.length;
+        setShown(full);
+        setDone(true);
+        rafRef.current = null;
+        return;
+      }
+      rafRef.current = requestAnimationFrame(tick);
+    };
+
+    rafRef.current = requestAnimationFrame(tick);
+
+    return () => stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [full, enabled, cps]);
+
+  return { shown, done, skip };
+}
+
+/* =========================
+   3) LocalStorage Save
+========================= */
+const SAVE_NS = 'ACEVN_GAME_DB_SAVE';
+const saveKey = (slot) => `${SAVE_NS}::slot::${slot}`;
+
 function lsSave(slot, data) {
   if (typeof window === 'undefined') return { ok: false, reason: 'no_window' };
   try {
@@ -154,7 +224,9 @@ function lsDelete(slot) {
 }
 
 /* =========================
-   3) Audio (optional assets)
+   4) Audio (BGM/SFX + Blip)
+   - BGM/SFX optional: /assets/bgm/*.ogg, /assets/sfx/*.ogg
+   - Blip: WebAudio oscillator (low latency)
 ========================= */
 function makeAudio(url, { loop = false, volume = 1 } = {}) {
   const a = new Audio(url);
@@ -184,30 +256,60 @@ async function fadeTo(audio, targetVol, ms) {
     requestAnimationFrame(tick);
   });
 }
+
 function useAudioBus() {
   const unlockedRef = useRef(false);
   const mutedRef = useRef(false);
+
   const bgmCurRef = useRef({ key: null, audio: null, cache: new Map() });
   const sfxPoolRef = useRef(new Map());
+
+  // WebAudio for blip
+  const ctxRef = useRef(null);
+  const masterRef = useRef(null);
+  const lastBlipRef = useRef(0);
+
+  const ensureCtx = () => {
+    if (typeof window === 'undefined') return null;
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return null;
+    if (!ctxRef.current) {
+      const ctx = new AudioCtx();
+      const master = ctx.createGain();
+      master.gain.value = 0.65;
+      master.connect(ctx.destination);
+      ctxRef.current = ctx;
+      masterRef.current = master;
+    }
+    return ctxRef.current;
+  };
 
   const unlock = async () => {
     if (unlockedRef.current) return true;
     unlockedRef.current = true;
+
+    // unlock HTMLAudio
     try {
       const t = new Audio();
       t.muted = true;
       await t.play().catch(() => {});
       t.pause();
-      return true;
-    } catch {
-      return false;
-    }
+    } catch {}
+
+    // unlock WebAudio
+    try {
+      const ctx = ensureCtx();
+      if (ctx && ctx.state === 'suspended') await ctx.resume().catch(() => {});
+    } catch {}
+
+    return true;
   };
 
   const setMuted = async (m) => {
     mutedRef.current = !!m;
     const cur = bgmCurRef.current.audio;
     if (cur) cur.volume = mutedRef.current ? 0 : cur.volume;
+    if (masterRef.current) masterRef.current.gain.value = mutedRef.current ? 0 : 0.65;
   };
 
   const playBgm = async (key, url, { fadeMs = 520, vol = 0.75 } = {}) => {
@@ -234,12 +336,8 @@ function useAudioBus() {
 
     if (prev && prev !== next) {
       await fadeTo(prev, 0, fadeMs);
-      try {
-        prev.pause();
-      } catch {}
-      try {
-        prev.currentTime = 0;
-      } catch {}
+      try { prev.pause(); } catch {}
+      try { prev.currentTime = 0; } catch {}
     }
   };
 
@@ -255,16 +353,11 @@ function useAudioBus() {
     }
     let picked = pool[0];
     for (const a of pool) {
-      if (a.paused || a.ended) {
-        picked = a;
-        break;
-      }
+      if (a.paused || a.ended) { picked = a; break; }
     }
     try {
       picked.volume = vol;
-      try {
-        picked.currentTime = 0;
-      } catch {}
+      try { picked.currentTime = 0; } catch {}
       await picked.play();
       return true;
     } catch {
@@ -272,11 +365,42 @@ function useAudioBus() {
     }
   };
 
-  return { unlock, setMuted, playBgm, playSfx };
+  const blip = ({ freq = 880, dur = 0.018, vol = 0.09 } = {}) => {
+    if (mutedRef.current) return;
+    const t = nowMs();
+    // throttle to prevent "machine gun"
+    if (t - lastBlipRef.current < 28) return;
+    lastBlipRef.current = t;
+
+    const ctx = ensureCtx();
+    const master = masterRef.current;
+    if (!ctx || !master) return;
+
+    try {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = 'square';
+      o.frequency.value = freq;
+      g.gain.value = vol;
+
+      o.connect(g);
+      g.connect(master);
+
+      const start = ctx.currentTime;
+      const end = start + Math.max(0.01, dur);
+      g.gain.setValueAtTime(vol, start);
+      g.gain.exponentialRampToValueAtTime(0.0001, end);
+
+      o.start(start);
+      o.stop(end + 0.01);
+    } catch {}
+  };
+
+  return { unlock, setMuted, playBgm, playSfx, blip };
 }
 
 /* =========================
-   4) Image preload (optional bg)
+   5) Image preload (optional bg)
 ========================= */
 function preloadImage(url) {
   return new Promise((resolve) => {
@@ -290,11 +414,10 @@ function preloadImage(url) {
 }
 
 /* =========================
-   5) GAME_DB (short playable)
-   - 실제 엔진 적용용: evolveOnPress / combination / examine 포함
+   6) GAME_DB (short playable)
 ========================= */
 const GAME_DB = {
-  meta: { title: '에피소드 1: 단선된 진실', description: '스마트 시티 인프라를 악용한 사건. 흑막은 직접 말하지 않고 흔적만 남긴다.' },
+  meta: { title: '에피소드 1: 단선된 진실', description: '스마트 시티 인프라를 악용한 사건. 흑막은 흔적만 남긴다.' },
   backgrounds: {
     court: 'bg-gradient-to-b from-slate-950 via-slate-900 to-black',
     hall: 'bg-gradient-to-b from-slate-900 to-slate-800',
@@ -424,13 +547,7 @@ const GAME_DB = {
           witnessCharKey: 'prosecutor',
           bgKey: 'tense',
           statements: [
-            {
-              id: 'p_01',
-              text: '사망 추정 시각은 21:00입니다',
-              weakness: true,
-              contradictionEvidenceKey: 'real_time_of_death',
-              failMsg: '부검+워치를 조합해라',
-            },
+            { id: 'p_01', text: '사망 추정 시각은 21:00입니다', weakness: true, contradictionEvidenceKey: 'real_time_of_death', failMsg: '부검+워치를 조합해라' },
           ],
         },
 
@@ -501,7 +618,7 @@ const GAME_DB = {
 };
 
 /* =========================
-   6) Compile DSL → runtime
+   7) Compile DSL → runtime
 ========================= */
 function compileGame(db) {
   const baseCase = db.cases?.[0];
@@ -512,42 +629,28 @@ function compileGame(db) {
     if (!raw || !raw.type) continue;
 
     if (raw.type === 'talk') {
-      lines.push({
-        type: 'talk',
-        charKey: raw.charKey || 'narrator',
-        text: normalizeKoreanEnding(raw.text),
-        face: raw.face || 'normal',
-        bgKey: raw.bgKey || null,
-      });
+      lines.push({ type: 'talk', charKey: raw.charKey || 'narrator', text: normalizeKoreanEnding(raw.text), face: raw.face || 'normal', bgKey: raw.bgKey || null });
       continue;
     }
-
     if (raw.type === 'scene') {
       lines.push({ type: 'scene', bgKey: raw.bgKey || 'court', bgmKey: raw.bgmKey || null });
       continue;
     }
-
     if (raw.type === 'anim') {
       lines.push({ type: 'anim', name: raw.name || 'flash' });
       continue;
     }
-
     if (raw.type === 'end') {
       lines.push({ type: 'end', text: String(raw.text || 'THE END') });
       continue;
     }
-
     if (raw.type === 'trial') {
       const statements = (raw.statements || []).map((s) => ({
         id: s.id || uid('stmt'),
         text: normalizeKoreanEnding(s.text),
         pressQ: s.pressQ ? normalizeKoreanEnding(s.pressQ) : null,
         press: Array.isArray(s.press)
-          ? s.press.map((p) => ({
-              charKey: p.charKey || 'narrator',
-              face: p.face || 'normal',
-              text: normalizeKoreanEnding(p.text),
-            }))
+          ? s.press.map((p) => ({ charKey: p.charKey || 'narrator', face: p.face || 'normal', text: normalizeKoreanEnding(p.text) }))
           : [],
         evolveOnPress: s.evolveOnPress
           ? {
@@ -561,17 +664,9 @@ function compileGame(db) {
         contradictionEvidenceKey: s.contradictionEvidenceKey || null,
         failMsg: s.failMsg ? normalizeKoreanEnding(s.failMsg) : null,
       }));
-
-      lines.push({
-        type: 'cross_exam',
-        title: raw.title || '심문',
-        bgKey: raw.bgKey || 'court',
-        witnessCharKey: raw.witnessCharKey || 'witness1',
-        statements,
-      });
+      lines.push({ type: 'cross_exam', title: raw.title || '심문', bgKey: raw.bgKey || 'court', witnessCharKey: raw.witnessCharKey || 'witness1', statements });
       continue;
     }
-
     lines.push(raw);
   }
 
@@ -588,7 +683,7 @@ function compileGame(db) {
 }
 
 /* =========================
-   7) State + Reducer
+   8) State + Reducer
 ========================= */
 const AT = {
   RESET: 'RESET',
@@ -633,7 +728,6 @@ function reducer(game, state, action) {
   switch (action.type) {
     case AT.RESET:
       return initialState(game);
-
     case AT.HYDRATE:
       return action.state && isObj(action.state) ? action.state : state;
 
@@ -654,22 +748,15 @@ function reducer(game, state, action) {
       const s = getStatement();
       const n = s?.press?.length || 0;
       if (n <= 0) return { ...state, pressMode: false, pressIndex: 0 };
-
       const last = state.pressIndex >= n - 1;
       if (!last) return { ...state, pressIndex: state.pressIndex + 1 };
 
       const evo = s?.evolveOnPress;
       if (evo) {
         const nextEvolved = { ...(state.evolved || {}) };
-        nextEvolved[s.id] = {
-          text: evo.newText,
-          weakness: !!evo.weakness,
-          contradictionEvidenceKey: evo.contradictionEvidenceKey,
-          failMsg: evo.failMsg,
-        };
+        nextEvolved[s.id] = { text: evo.newText, weakness: !!evo.weakness, contradictionEvidenceKey: evo.contradictionEvidenceKey, failMsg: evo.failMsg };
         return { ...state, evolved: nextEvolved, pressMode: false, pressIndex: 0 };
       }
-
       return { ...state, pressMode: false, pressIndex: 0 };
     }
 
@@ -694,7 +781,6 @@ function reducer(game, state, action) {
 
     case AT.NEXT: {
       if (state.ending || state.gameOver) return state;
-
       if (state.pressMode) return reducer(game, state, { type: AT.PRESS_NEXT });
 
       if (!line) return state;
@@ -709,12 +795,6 @@ function reducer(game, state, action) {
 
       if (line.type === 'cross_exam') {
         const total = line.statements?.length || 0;
-        if (total <= 0) {
-          const nextIdx = clamp(state.idx + 1, 0, lines.length - 1);
-          const nextLine = lines[nextIdx];
-          return { ...state, idx: nextIdx, bgKey: nextLine?.bgKey || state.bgKey, ceIndex: 0 };
-        }
-
         const last = state.ceIndex >= total - 1;
         if (last) {
           const weakIdx = (line.statements || [])
@@ -731,7 +811,6 @@ function reducer(game, state, action) {
           const nextLine = lines[nextIdx];
           return { ...state, idx: nextIdx, bgKey: nextLine?.bgKey || state.bgKey, ceIndex: 0 };
         }
-
         return { ...state, ceIndex: state.ceIndex + 1 };
       }
 
@@ -747,7 +826,7 @@ function reducer(game, state, action) {
 }
 
 /* =========================
-   8) Runtime selectors
+   9) Runtime selectors
 ========================= */
 function pickAvatar(char, face) {
   const a = char?.avatars || {};
@@ -811,7 +890,7 @@ function deriveView(game, state) {
 }
 
 /* =========================
-   9) Evidence combine / examine helpers
+   10) Evidence helpers
 ========================= */
 function findCombination(combos, a, b) {
   const req = [a, b].sort().join('::');
@@ -819,12 +898,8 @@ function findCombination(combos, a, b) {
 }
 
 /* =========================
-   10) UI Components
+   11) UI Components
 ========================= */
-function Pill({ children }) {
-  return <div className="px-4 py-2 rounded-full border border-white/10 bg-black/45 backdrop-blur-md">{children}</div>;
-}
-
 function ModalShell({ open, onClose, title, icon, children, footer }) {
   if (!open) return null;
   return (
@@ -859,9 +934,7 @@ function EvidenceModal({ open, onClose, inventory, evidenceMap, onPresent, onExa
       icon={<FileText className="w-5 h-5 text-amber-300" />}
       footer={
         <div className="flex items-center justify-between gap-3">
-          <div className="text-xs text-gray-400" style={{ fontFamily: 'Inter, sans-serif' }}>
-            {hint || ''}
-          </div>
+          <div className="text-xs text-gray-400">{hint || ''}</div>
           <div className="flex gap-2">
             <button onClick={onOpenCombine} className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold">
               조합
@@ -896,10 +969,7 @@ function EvidenceModal({ open, onClose, inventory, evidenceMap, onPresent, onExa
                     조사
                   </button>
                 ) : null}
-                <button
-                  onClick={() => onPresent(key)}
-                  className="px-4 py-2 rounded-xl bg-amber-600/80 hover:bg-amber-500 border border-amber-400/30 font-semibold"
-                >
+                <button onClick={() => onPresent(key)} className="px-4 py-2 rounded-xl bg-amber-600/80 hover:bg-amber-500 border border-amber-400/30 font-semibold">
                   제시
                 </button>
               </div>
@@ -1029,12 +1099,7 @@ function SaveLoadModal({ open, onClose, onSave, onLoad, onDelete }) {
   };
 
   return (
-    <ModalShell
-      open={open}
-      onClose={onClose}
-      title="세이브/로드"
-      icon={<HardDrive className="w-5 h-5 text-gray-200" />}
-    >
+    <ModalShell open={open} onClose={onClose} title="세이브/로드" icon={<HardDrive className="w-5 h-5 text-gray-200" />}>
       {toast ? (
         <div className={`mb-4 rounded-2xl border px-4 py-3 text-sm ${toast.ok ? 'bg-emerald-500/10 border-emerald-400/20 text-emerald-100' : 'bg-rose-500/10 border-rose-400/20 text-rose-100'}`}>
           {toast.msg}
@@ -1046,25 +1111,13 @@ function SaveLoadModal({ open, onClose, onSave, onLoad, onDelete }) {
           <div key={slot} className="rounded-2xl border border-white/10 bg-white/5 p-4 flex flex-wrap items-center gap-2">
             <div className="text-sm font-semibold text-white">슬롯 {slot}</div>
             <div className="ml-auto flex flex-wrap gap-2">
-              <button
-                disabled={busy != null}
-                onClick={() => run(slot, onSave, '저장 완료', '저장 실패')}
-                className="px-3 py-2 rounded-xl bg-blue-600/80 hover:bg-blue-500 border border-blue-400/30 font-semibold disabled:opacity-40"
-              >
+              <button disabled={busy != null} onClick={() => run(slot, onSave, '저장 완료', '저장 실패')} className="px-3 py-2 rounded-xl bg-blue-600/80 hover:bg-blue-500 border border-blue-400/30 font-semibold disabled:opacity-40">
                 <span className="inline-flex items-center gap-2"><Save className="w-4 h-4" />저장</span>
               </button>
-              <button
-                disabled={busy != null}
-                onClick={() => run(slot, onLoad, '로드 완료', '로드 실패')}
-                className="px-3 py-2 rounded-xl bg-emerald-600/80 hover:bg-emerald-500 border border-emerald-400/30 font-semibold disabled:opacity-40"
-              >
+              <button disabled={busy != null} onClick={() => run(slot, onLoad, '로드 완료', '로드 실패')} className="px-3 py-2 rounded-xl bg-emerald-600/80 hover:bg-emerald-500 border border-emerald-400/30 font-semibold disabled:opacity-40">
                 <span className="inline-flex items-center gap-2"><FolderOpen className="w-4 h-4" />로드</span>
               </button>
-              <button
-                disabled={busy != null}
-                onClick={() => run(slot, onDelete, '삭제 완료', '삭제 실패')}
-                className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-500 border border-rose-400/30 font-semibold disabled:opacity-40"
-              >
+              <button disabled={busy != null} onClick={() => run(slot, onDelete, '삭제 완료', '삭제 실패')} className="px-3 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-500 border border-rose-400/30 font-semibold disabled:opacity-40">
                 <span className="inline-flex items-center gap-2"><Trash2 className="w-4 h-4" />삭제</span>
               </button>
             </div>
@@ -1076,12 +1129,12 @@ function SaveLoadModal({ open, onClose, onSave, onLoad, onDelete }) {
 }
 
 /* =========================
-   11) Page
+   12) Page
 ========================= */
 export default function Page() {
   const audio = useAudioBus();
 
-  // runtime error overlay
+  // error overlay
   const [runtimeErr, setRuntimeErr] = useState(null);
   useEffect(() => {
     const onError = (event) => {
@@ -1107,6 +1160,7 @@ export default function Page() {
   const [state, dispatch] = useReducer((s, a) => reducer(game, s, a), undefined, () => initialState(game));
   const view = useMemo(() => deriveView(game, state), [game, state]);
 
+  // UI
   const [muted, setMuted] = useState(false);
   const [bgUrl, setBgUrl] = useState(null);
   const [shake, setShake] = useState(false);
@@ -1129,7 +1183,7 @@ export default function Page() {
   const doOverlay = (t, ms = 1000) => (setOverlayMsg(t), setTimeout(() => setOverlayMsg(null), ms));
   const doEffect = (t, ms = 850) => (setEffectText(t), setTimeout(() => setEffectText(null), ms));
 
-  // ✅ next button debounce
+  // debounce next
   const lastNextRef = useRef(0);
   const canNext = () => {
     const t = nowMs();
@@ -1138,13 +1192,13 @@ export default function Page() {
     return true;
   };
 
-  // optional bg image
+  // bg image optional
   useEffect(() => {
     const candidate = `/assets/bg/${view.bgKey}.webp`;
     preloadImage(candidate).then((ok) => setBgUrl(ok ? candidate : null));
   }, [view.bgKey]);
 
-  // optional bgm
+  // bgm optional
   useEffect(() => {
     const line = view.line;
     if (!line || line.type !== 'scene') return;
@@ -1165,15 +1219,14 @@ export default function Page() {
     await audio.playSfx(k, url).catch(() => {});
   };
 
-  // auto-advance scenes
+  // auto-advance scene
   useEffect(() => {
     if (view.line?.type === 'scene') dispatch({ type: AT.NEXT });
   }, [view.line?.type]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // anim effect + auto-advance
+  // anim effect
   useEffect(() => {
     if (view.line?.type !== 'anim') return;
-
     if (view.line.name === 'objection') {
       doEffect('OBJECTION!');
       doFlash();
@@ -1185,9 +1238,28 @@ export default function Page() {
       doFlash();
       sfx('flash');
     }
-
     dispatch({ type: AT.NEXT });
   }, [view.line?.type]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // typewriter + blip
+  const { shown: typedText, done: typedDone, skip: typedSkip } = useTypewriter(view.text, {
+    enabled: true,
+    cps: view.isCE ? 42 : 34,
+  });
+
+  // blip while typing
+  const lastLenRef = useRef(0);
+  useEffect(() => {
+    const curLen = typedText.length;
+    const prevLen = lastLenRef.current;
+    if (curLen > prevLen && !typedDone) {
+      // every 2 chars
+      if (curLen % 2 === 0) {
+        audio.blip({ freq: view.isCE ? 920 : 780, dur: 0.018, vol: 0.09 });
+      }
+    }
+    lastLenRef.current = curLen;
+  }, [typedText, typedDone, view.isCE]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const doPresent = async (key) => {
     await unlock();
@@ -1226,13 +1298,12 @@ export default function Page() {
       doOverlay('아무 일도 없다');
       return;
     }
-
     if (!state.inv.includes(hit.result)) {
       const inv = Array.from(new Set([...state.inv, hit.result]));
       dispatch({ type: AT.HYDRATE, state: { ...state, inv } });
     }
     doOverlay(hit.successMsg || '새 단서');
-    await sfx('admit');
+    await sfx('tap');
   };
 
   const onHotspotFound = async (h) => {
@@ -1243,7 +1314,7 @@ export default function Page() {
       dispatch({ type: AT.HYDRATE, state: { ...state, inv } });
     }
     doOverlay(h.successMsg || '단서');
-    await sfx('admit');
+    await sfx('tap');
   };
 
   // save/load
@@ -1268,18 +1339,32 @@ export default function Page() {
 
   const bgStyle = bgUrl ? { backgroundImage: `url(${bgUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined;
 
+  // NEXT handler: typing -> skip, else advance
+  const onNext = async () => {
+    if (!canNext()) return;
+    await unlock();
+    await sfx('tap');
+
+    if (!typedDone) {
+      typedSkip();
+      return;
+    }
+    dispatch({ type: AT.NEXT });
+  };
+
+  const speaker = view.speaker;
+  const avatar = view.avatar;
+  const pressable = view.isCE && !!view.stmt?.pressQ && (view.stmt?.press?.length || 0) > 0;
+  const weakNow = !!view.stmt?.weakness;
+
   if (state.gameOver) {
     return (
       <div className={`min-h-screen ${GAME_DB.backgrounds.gameover} text-white flex items-center justify-center p-6`} style={bgStyle}>
         <style jsx global>{GLOBAL_CSS}</style>
         <div className="w-full max-w-lg rounded-3xl bg-black/60 border border-white/10 backdrop-blur-xl p-8 text-center">
           <div className="text-6xl mb-4">💥</div>
-          <div className="text-4xl font-bold mb-3" style={{ fontFamily: 'Crimson Pro, serif' }}>
-            게임 오버
-          </div>
-          <button onClick={() => dispatch({ type: AT.RESET })} className="px-6 py-3 rounded-xl bg-white text-black font-semibold">
-            다시 시작
-          </button>
+          <div className="text-4xl font-bold mb-3" style={{ fontFamily: 'Crimson Pro, serif' }}>게임 오버</div>
+          <button onClick={() => dispatch({ type: AT.RESET })} className="px-6 py-3 rounded-xl bg-white text-black font-semibold">다시 시작</button>
         </div>
       </div>
     );
@@ -1291,39 +1376,23 @@ export default function Page() {
         <style jsx global>{GLOBAL_CSS}</style>
         <div className="w-full max-w-2xl rounded-3xl bg-black/60 border border-white/10 backdrop-blur-xl p-8 text-center">
           <Scale className="w-20 h-20 mx-auto mb-5 text-blue-400" />
-          <div className="text-5xl font-bold mb-3" style={{ fontFamily: 'Crimson Pro, serif' }}>
-            {GAME_DB.meta.title}
-          </div>
-          <button onClick={() => dispatch({ type: AT.RESET })} className="px-6 py-3 rounded-xl bg-white text-black font-semibold">
-            다시하기
-          </button>
+          <div className="text-5xl font-bold mb-3" style={{ fontFamily: 'Crimson Pro, serif' }}>{GAME_DB.meta.title}</div>
+          <button onClick={() => dispatch({ type: AT.RESET })} className="px-6 py-3 rounded-xl bg-white text-black font-semibold">다시하기</button>
         </div>
       </div>
     );
   }
 
-  const speaker = view.speaker;
-  const avatar = view.avatar;
-  const pressable = view.isCE && !!view.stmt?.pressQ && (view.stmt?.press?.length || 0) > 0;
-  const weakNow = !!view.stmt?.weakness;
-
-  const hint = view.hint;
-
   return (
     <div className={`h-screen w-full relative overflow-hidden ${view.bgClass} ${shake ? 'animate-shake' : ''}`} style={bgStyle}>
       <style jsx global>{GLOBAL_CSS}</style>
 
-      {/* runtime error overlay */}
       {runtimeErr ? (
         <div className="fixed inset-0 z-[9999] bg-black/90 text-white p-4 overflow-auto">
           <div className="max-w-3xl mx-auto">
             <div className="text-xl font-bold mb-2">Client Error Captured</div>
-            <div className="text-sm text-rose-200 mb-3">
-              {runtimeErr.type}: {runtimeErr.msg}
-            </div>
-            <pre className="text-xs whitespace-pre-wrap bg-white/5 border border-white/10 rounded-xl p-3">
-{runtimeErr.stack || '(no stack)'}
-            </pre>
+            <div className="text-sm text-rose-200 mb-3">{runtimeErr.type}: {runtimeErr.msg}</div>
+            <pre className="text-xs whitespace-pre-wrap bg-white/5 border border-white/10 rounded-xl p-3">{runtimeErr.stack || '(no stack)'}</pre>
           </div>
         </div>
       ) : null}
@@ -1347,11 +1416,7 @@ export default function Page() {
 
             <div className="flex items-center gap-2">
               <button
-                onClick={async () => {
-                  await unlock();
-                  setSaveOpen(true);
-                  await sfx('tap');
-                }}
+                onClick={async () => { await unlock(); setSaveOpen(true); await sfx('tap'); }}
                 className="w-11 h-11 rounded-full bg-black/45 border border-white/10 hover:border-white/20 backdrop-blur-md flex items-center justify-center"
                 aria-label="save"
               >
@@ -1359,11 +1424,7 @@ export default function Page() {
               </button>
 
               <button
-                onClick={async () => {
-                  await unlock();
-                  setMuted((m) => !m);
-                  await sfx('tap');
-                }}
+                onClick={async () => { await unlock(); setMuted((m) => !m); await sfx('tap'); }}
                 className="w-11 h-11 rounded-full bg-black/45 border border-white/10 hover:border-white/20 backdrop-blur-md flex items-center justify-center"
                 aria-label="mute"
               >
@@ -1371,12 +1432,7 @@ export default function Page() {
               </button>
 
               <button
-                onClick={async () => {
-                  await unlock();
-                  setEvidenceOpen(true);
-                  dispatch({ type: AT.OPEN_EVIDENCE });
-                  await sfx('tap');
-                }}
+                onClick={async () => { await unlock(); setEvidenceOpen(true); dispatch({ type: AT.OPEN_EVIDENCE }); await sfx('tap'); }}
                 className="h-11 px-4 rounded-full bg-black/45 border border-white/10 hover:border-white/20 backdrop-blur-md flex items-center gap-2"
                 aria-label="evidence"
               >
@@ -1389,13 +1445,10 @@ export default function Page() {
           </div>
         </div>
 
-        {/* ✅ Cross tab (green) */}
         {view.isCE ? (
           <div className="px-4 mt-3">
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-emerald-400/40 bg-emerald-500/10 text-emerald-200 backdrop-blur-md neon-pulse">
-              <span className="text-[11px] font-black tracking-widest" style={{ fontFamily: 'Inter, sans-serif' }}>
-                CROSS EXAMINATION
-              </span>
+              <span className="text-[11px] font-black tracking-widest" style={{ fontFamily: 'Inter, sans-serif' }}>CROSS EXAMINATION</span>
               <span className="text-[11px] font-semibold" style={{ fontFamily: 'Inter, sans-serif' }}>
                 · {view.ceTitle} · {view.ceIndex + 1}/{view.ceTotal} {weakNow ? '· WEAK' : ''}
               </span>
@@ -1440,7 +1493,7 @@ export default function Page() {
         </div>
       ) : null}
 
-      {/* Dialogue */}
+      {/* Dialogue (no click-to-advance) */}
       <div className="absolute bottom-0 left-0 right-0 z-40 safe-bottom">
         <div className="p-4 md:p-6">
           <div className="max-w-5xl mx-auto">
@@ -1455,13 +1508,15 @@ export default function Page() {
               </div>
             ) : null}
 
-            {/* ✅ 대화박스는 클릭으로 진행하지 않음 */}
             <div className="relative bg-black/80 border border-white/10 rounded-2xl p-5 md:p-6 min-h-[170px] backdrop-blur-xl">
-              <div className={`text-lg md:text-xl leading-relaxed ${view.isCE ? 'text-emerald-100' : 'text-white'}`} style={{ fontFamily: 'Inter, sans-serif', fontWeight: 500 }}>
-                {view.text}
+              <div
+                className={`text-lg md:text-xl leading-relaxed ${view.isCE ? 'text-emerald-100' : 'text-white'}`}
+                style={{ fontFamily: 'Inter, sans-serif', fontWeight: 500 }}
+              >
+                {typedText}
+                {!typedDone ? <span className="inline-block w-2">▍</span> : null}
               </div>
 
-              {/* actions */}
               <div className="mt-5 flex flex-wrap gap-2">
                 {view.isCE ? (
                   <button
@@ -1470,6 +1525,7 @@ export default function Page() {
                       e.stopPropagation();
                       await unlock();
                       await sfx('tap');
+                      if (!typedDone) { typedSkip(); return; }
                       dispatch({ type: AT.PRESS });
                       if (view.stmt?.pressQ) doOverlay(view.stmt.pressQ);
                     }}
@@ -1488,6 +1544,7 @@ export default function Page() {
                     e.stopPropagation();
                     await unlock();
                     await sfx('tap');
+                    if (!typedDone) { typedSkip(); return; }
                     setEvidenceOpen(true);
                     dispatch({ type: AT.OPEN_EVIDENCE });
                   }}
@@ -1514,15 +1571,11 @@ export default function Page() {
                   리셋
                 </button>
 
-                {/* ✅ NEXT 버튼만 진행 */}
                 <button
                   onClick={async (e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    if (!canNext()) return;
-                    await unlock();
-                    await sfx('tap');
-                    dispatch({ type: AT.NEXT });
+                    await onNext();
                   }}
                   className="ml-auto px-5 py-2 rounded-xl bg-white text-black font-black flex items-center gap-2"
                   style={{ fontFamily: 'Inter, sans-serif' }}
@@ -1532,13 +1585,12 @@ export default function Page() {
                 </button>
               </div>
 
-              {hint ? <div className="mt-3 text-xs text-gray-400">{hint}</div> : null}
+              {view.hint ? <div className="mt-3 text-xs text-gray-400">{view.hint}</div> : null}
             </div>
           </div>
         </div>
       </div>
 
-      {/* Evidence Modal */}
       <EvidenceModal
         open={evidenceOpen && state.evidenceOpen}
         onClose={async () => {
@@ -1549,22 +1601,15 @@ export default function Page() {
         }}
         inventory={state.inv}
         evidenceMap={game.evidence}
+        hint={view.hint}
         onPresent={(key) => doPresent(key)}
-        onExamine={(key) => {
-          setExamineKey(key);
-          setExamineOpen(true);
-        }}
+        onExamine={(key) => { setExamineKey(key); setExamineOpen(true); }}
         onOpenCombine={() => setCombineOpen(true)}
-        hint={hint}
       />
 
       <CombineModal
         open={combineOpen}
-        onClose={() => {
-          setCombineOpen(false);
-          setCombineA(null);
-          setCombineB(null);
-        }}
+        onClose={() => { setCombineOpen(false); setCombineA(null); setCombineB(null); }}
         inventory={state.inv}
         evidenceMap={game.evidence}
         a={combineA}
@@ -1576,16 +1621,19 @@ export default function Page() {
 
       <ExamineModal
         open={examineOpen}
-        onClose={() => {
-          setExamineOpen(false);
-          setExamineKey(null);
-        }}
+        onClose={() => { setExamineOpen(false); setExamineKey(null); }}
         evidenceKey={examineKey}
         evidence={examineKey ? game.evidence[examineKey] : null}
         onFound={onHotspotFound}
       />
 
-      <SaveLoadModal open={saveOpen} onClose={() => setSaveOpen(false)} onSave={onSave} onLoad={onLoad} onDelete={onDelete} />
+      <SaveLoadModal
+        open={saveOpen}
+        onClose={() => setSaveOpen(false)}
+        onSave={onSave}
+        onLoad={onLoad}
+        onDelete={onDelete}
+      />
     </div>
   );
-    }
+        }
