@@ -7,6 +7,7 @@ import {
   FileText,
   Search,
   ChevronRight,
+  ChevronLeft,
   Volume2,
   VolumeX,
   RotateCcw,
@@ -14,24 +15,17 @@ import {
   FolderOpen,
   Trash2,
   Save,
-  ChevronLeft,
 } from 'lucide-react';
 
 /* =========================================================
    app/page.js — SINGLE FILE (RUNNABLE)
-   ✅ Added:
-   - Prev 버튼 (상태 스냅샷 기반 되감기)
-   - Prosecutor 말투 자연화(‘오차율 0%’ 삭제)
-   - Typewriter + Blip 유지
-   - Next/Prev:
-       - 타이핑 중이면 먼저 스킵(완성)
-       - 완료 상태에서만 실제 이동
-   ✅ Still:
-   - 클릭으로 자동 진행 없음 (버튼만)
-   - Cross Exam 탭(초록색)
-   - Press → evolveOnPress
-   - Evidence Present / Combine / Examine hotspot
-   - Save/Load
+   ✅ FIX: Pill is not defined
+      - Pill 컴포넌트를 Page보다 "위에" 선언 (SSR/Hoist 문제 방지)
+   ✅ Prev/Next
+   ✅ Prosecutor tone fixed (no "오차율 0%")
+   ✅ Typewriter + Blip
+   ✅ No click-to-advance (buttons only)
+   ✅ Cross exam gate: evolveOnPress(추궁) + weakness(제시) 없으면 통과 불가
 ========================================================= */
 
 /* =========================
@@ -54,7 +48,14 @@ html,body{height:100%}
 `;
 
 /* =========================
-   1) Utils
+   1) UI Primitive (MUST be above Page)
+========================= */
+function Pill({ children }) {
+  return <div className="px-4 py-2 rounded-full border border-white/10 bg-black/45 backdrop-blur-md">{children}</div>;
+}
+
+/* =========================
+   2) Utils
 ========================= */
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
@@ -64,6 +65,14 @@ function nowMs() {
   return typeof performance !== 'undefined' ? performance.now() : Date.now();
 }
 
+function safeJSONParse(s, fb = null) {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return fb;
+  }
+}
+
 function normalizeKoreanSentence(raw) {
   const s0 = String(raw ?? '').trim();
   if (!s0) return s0;
@@ -71,10 +80,8 @@ function normalizeKoreanSentence(raw) {
   if (['.', '!', '?', '…'].includes(last)) return s0;
   if (last === ')' || last === ']' || last === '"' || last === "'") return s0;
 
-  // 질문 패턴
   if (/(까|나요|습니까|죠)$/.test(s0)) return s0 + '?';
 
-  // 종결 어미
   if (
     s0.endsWith('다') ||
     s0.endsWith('요') ||
@@ -92,16 +99,8 @@ function normalizeKoreanSentence(raw) {
   return s0 + '.';
 }
 
-function safeJSONParse(s, fb = null) {
-  try {
-    return JSON.parse(s);
-  } catch {
-    return fb;
-  }
-}
-
 /* =========================
-   2) Typewriter
+   3) Typewriter
 ========================= */
 function useTypewriter(text, { enabled = true, cps = 34 } = {}) {
   const full = String(text ?? '');
@@ -133,7 +132,6 @@ function useTypewriter(text, { enabled = true, cps = 34 } = {}) {
       idxRef.current = full.length;
       return;
     }
-
     if (!full) {
       setShown('');
       setDone(true);
@@ -181,7 +179,7 @@ function useTypewriter(text, { enabled = true, cps = 34 } = {}) {
 }
 
 /* =========================
-   3) LocalStorage Save
+   4) LocalStorage Save
 ========================= */
 const SAVE_NS = 'ACEVN_SAVE';
 const saveKey = (slot) => `${SAVE_NS}::slot::${slot}`;
@@ -214,7 +212,7 @@ function lsDelete(slot) {
 }
 
 /* =========================
-   4) Audio (BGM/SFX + Blip)
+   5) Audio (BGM/SFX + Blip)
 ========================= */
 function makeAudio(url, { loop = false, volume = 1 } = {}) {
   const a = new Audio(url);
@@ -244,7 +242,6 @@ async function fadeTo(audio, targetVol, ms) {
     requestAnimationFrame(tick);
   });
 }
-
 function useAudioBus() {
   const unlockedRef = useRef(false);
   const mutedRef = useRef(false);
@@ -369,6 +366,7 @@ function useAudioBus() {
       const en = st + Math.max(0.01, dur);
       g.gain.setValueAtTime(vol, st);
       g.gain.exponentialRampToValueAtTime(0.0001, en);
+
       o.start(st);
       o.stop(en + 0.01);
     } catch {}
@@ -378,7 +376,7 @@ function useAudioBus() {
 }
 
 /* =========================
-   5) Optional BG image preload
+   6) Optional BG image preload
 ========================= */
 function preloadImage(url) {
   return new Promise((resolve) => {
@@ -392,7 +390,7 @@ function preloadImage(url) {
 }
 
 /* =========================
-   6) GAME_DB (Prosecutor dialogue fixed)
+   7) GAME_DB
 ========================= */
 const GAME_DB = {
   meta: { title: '에피소드 1: 단선된 진실', description: '로그와 분류가 진실을 가장한다. 첫 재판에서 그 착각을 부순다.' },
@@ -411,39 +409,18 @@ const GAME_DB = {
     witness1: {
       name: '박경비',
       color: '#10B981',
-      avatars: {
-        normal:
-          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%2310B981'/%3E%3Ctext x='50' y='62' font-size='28' text-anchor='middle' fill='white'%3E경비%3C/text%3E%3C/svg%3E",
-        sweat:
-          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23F59E0B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😰%3C/text%3E%3C/svg%3E",
-        crazy:
-          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23991B1B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E🤯%3C/text%3E%3C/svg%3E",
-      },
+      avatars: { normal: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%2310B981'/%3E%3Ctext x='50' y='62' font-size='28' text-anchor='middle' fill='white'%3E경비%3C/text%3E%3C/svg%3E", sweat: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23F59E0B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😰%3C/text%3E%3C/svg%3E", crazy: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23991B1B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E🤯%3C/text%3E%3C/svg%3E" }
     },
     witness2: {
       name: '최실장',
       color: '#8B5CF6',
-      avatars: {
-        normal:
-          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%238B5CF6'/%3E%3Ctext x='50' y='62' font-size='28' text-anchor='middle' fill='white'%3EIT%3C/text%3E%3C/svg%3E",
-        sweat:
-          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23F59E0B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😰%3C/text%3E%3C/svg%3E",
-        crazy:
-          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23991B1B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😈%3C/text%3E%3C/svg%3E",
-      },
+      avatars: { normal: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%238B5CF6'/%3E%3Ctext x='50' y='62' font-size='28' text-anchor='middle' fill='white'%3EIT%3C/text%3E%3C/svg%3E", sweat: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23F59E0B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😰%3C/text%3E%3C/svg%3E", crazy: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23991B1B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😈%3C/text%3E%3C/svg%3E" }
     },
     witness3: {
       name: '윤기사',
       color: '#06B6D4',
-      avatars: {
-        normal:
-          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%2306B6D4'/%3E%3Ctext x='50' y='62' font-size='28' text-anchor='middle' fill='white'%3E기사%3C/text%3E%3C/svg%3E",
-        sweat:
-          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23F59E0B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😰%3C/text%3E%3C/svg%3E",
-        crazy:
-          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23991B1B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😡%3C/text%3E%3C/svg%3E",
-      },
-    },
+      avatars: { normal: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%2306B6D4'/%3E%3Ctext x='50' y='62' font-size='28' text-anchor='middle' fill='white'%3E기사%3C/text%3E%3C/svg%3E", sweat: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23F59E0B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😰%3C/text%3E%3C/svg%3E", crazy: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23991B1B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😡%3C/text%3E%3C/svg%3E" }
+    }
   },
   evidence: {
     autopsy: { name: '검시 소견서', icon: '🧾', desc: '사인은 둔기성 두부 손상이며, 사망 추정 시각은 21:00이다.' },
@@ -459,19 +436,19 @@ const GAME_DB = {
         bg: 'bg-slate-800 text-gray-200',
         content: '[압수품]\n금속 부품이다.\n끝부분 변색이 이상하다.',
         hotspots: [
-          { id: 'burn_mark', x: 78, y: 38, width: 16, height: 22, resultEvidenceKey: 'electric_burn', successMsg: '고전압 스파크에 의한 탄 자국이다.' },
+          { id: 'burn_mark', x: 78, y: 38, width: 16, height: 22, resultEvidenceKey: 'electric_burn', successMsg: '고전압 스파크에 의한 탄 자국이다.' }
         ],
       },
     },
     electric_burn: { name: '탄 자국', icon: '⚡', desc: '금속이 국부적으로 용융된 흔적이다.' },
     real_time_of_death: { name: '진짜 사망 시각', icon: '⏱️', desc: '스마트워치 기록에 따르면 사망은 20:45이다.' },
     staged_accident: { name: '감전사 위장', icon: '💀', desc: '감전사 이후 사후 타격으로 살인처럼 위장되었다.' },
-    evolved_voice_log: { name: '분류 조작 정황', icon: '🧩', desc: '프레임 드롭과 분류 편향으로 태깅 오류가 가능하다.' },
+    evolved_voice_log: { name: '분류 조작 정황', icon: '🧩', desc: '프레임 드롭과 분류 편향으로 태깅 오류가 가능하다.' }
   },
   combinations: [
     { req: ['autopsy', 'smartwatch_data'], result: 'real_time_of_death', successMsg: '부검과 워치를 합치면, 진짜 사망 시각은 20:45로 고정된다.' },
     { req: ['real_time_of_death', 'electric_burn'], result: 'staged_accident', successMsg: '탄 자국과 사망 시각이 맞물린다. 감전사 위장 정황이 완성된다.' },
-    { req: ['voice_print', 'hall_cctv'], result: 'evolved_voice_log', successMsg: '영상이 깨진 구간에서 음성 분류는 조작될 수 있다.' },
+    { req: ['voice_print', 'hall_cctv'], result: 'evolved_voice_log', successMsg: '영상이 깨진 구간에서 음성 분류는 조작될 수 있다.' }
   ],
   cases: [
     {
@@ -480,12 +457,9 @@ const GAME_DB = {
       initialEvidence: ['autopsy', 'smartwatch_data', 'server_log', 'server_blade', 'voice_print', 'hall_cctv'],
       script: [
         { type: 'scene', bgKey: 'court', bgmKey: 'trial' },
-
         { type: 'talk', charKey: 'judge', text: '지금부터 재판을 시작하겠습니다. 핵심만 말하세요' },
-
-        // ✅ Prosecutor natural
-        { type: 'talk', charKey: 'prosecutor', text: '정리부터 하죠. 21시. 서버실. 한 번의 타격. 그게 결론입니다' },
-        { type: 'talk', charKey: 'player', text: '결론부터 박아두면, 진실이 숨을 곳이 생깁니다. 숨을 못 쉬게 하죠' },
+        { type: 'talk', charKey: 'prosecutor', text: '정리부터 하죠. 21시. 서버실. 한 번의 타격. 그게 전부입니다' },
+        { type: 'talk', charKey: 'player', text: '전부라고요. 그 말부터 먼저 깨겠습니다' },
 
         { type: 'anim', name: 'cross_start' },
         {
@@ -501,24 +475,22 @@ const GAME_DB = {
               pressQ: '문이 열렸다는 근거가 있나요',
               press: [
                 { charKey: 'player', text: '도어락 기록은 확인했나요' },
-                { charKey: 'witness1', face: 'sweat', text: '그때는 몰랐습니다. 저는 그냥 눈으로 봤습니다' },
+                { charKey: 'witness1', face: 'sweat', text: '그때는 몰랐습니다. 저는 그냥 눈으로 봤습니다' }
               ],
               evolveOnPress: {
                 newText: '문이 열렸다고 생각했지만, 도어락 로그를 보니 열림 기록이 없었다고 들었습니다',
                 weakness: true,
                 contradictionEvidenceKey: 'server_log',
-                failMsg: '도어락 로그를 제시해서, 문이 열리지 않았음을 입증하라',
-              },
-            },
-          ],
+                failMsg: '도어락 로그를 제시해서, 문이 열리지 않았음을 입증하라'
+              }
+            }
+          ]
         },
 
         { type: 'anim', name: 'objection' },
-        { type: 'talk', charKey: 'player', text: '이의 있습니다. 20:55부터 21:05까지, 열림 이벤트가 없습니다' },
-
-        // ✅ Prosecutor natural retort
-        { type: 'talk', charKey: 'prosecutor', text: '좋아요. 그럼 더 단순해지네요. 안 나갔다면, 안에서 죽였겠죠' },
-        { type: 'talk', charKey: 'player', text: '그 단순함이 제일 위험하죠. 시간부터 다시 봅시다' },
+        { type: 'talk', charKey: 'player', text: '이의 있습니다. 20:55부터 21:05까지 열림 이벤트가 없습니다' },
+        { type: 'talk', charKey: 'prosecutor', text: '좋아요. 그러면 안에서 죽였겠죠. 이제 시간만 보면 됩니다' },
+        { type: 'talk', charKey: 'player', text: '그 시간부터 바꿔야 합니다' },
 
         { type: 'anim', name: 'cross_start' },
         {
@@ -529,17 +501,16 @@ const GAME_DB = {
           statements: [
             {
               id: 'p_01',
-              text: '부검은 21시를 가리킵니다. 그 이상도 이하도 아닙니다',
+              text: '부검 소견서는 21시를 가리킵니다. 결론은 단순합니다',
               weakness: true,
               contradictionEvidenceKey: 'real_time_of_death',
-              failMsg: '부검과 스마트워치를 조합해 진짜 사망 시각을 만든 뒤 제시하라',
-            },
-          ],
+              failMsg: '부검과 스마트워치를 조합해 진짜 사망 시각을 만든 뒤 제시하라'
+            }
+          ]
         },
 
         { type: 'talk', charKey: 'player', text: '선이 연결됐습니다. 심정지는 20:45입니다' },
-        { type: 'talk', charKey: 'prosecutor', text: '…그래서요. 21시에 때린 게 아니라는 말입니까' },
-        { type: 'talk', charKey: 'player', text: '네. 21시는 사후입니다. 위장일 가능성이 생겼습니다' },
+        { type: 'talk', charKey: 'prosecutor', text: '…그럼 21시는 사후라는 말이군요. 위장 가능성이 생깁니다' },
 
         { type: 'anim', name: 'cross_start' },
         {
@@ -550,25 +521,23 @@ const GAME_DB = {
           statements: [
             {
               id: 'w2_01',
-              text: '블레이드에 피가 있습니다. 그럼 살인입니다. 더 볼 게 없어요',
+              text: '블레이드에 피가 있습니다. 그러니 살인입니다',
               pressQ: '피가 있으면 무조건 살인인가요',
               press: [
                 { charKey: 'player', text: '끝부분 변색은 확인했나요' },
-                { charKey: 'witness2', face: 'sweat', text: '그런 건 중요하지 않습니다. 피가 먼저죠' },
+                { charKey: 'witness2', face: 'sweat', text: '그런 건 중요하지 않습니다. 피가 먼저죠' }
               ],
               evolveOnPress: {
                 newText: '피가 묻은 흉기면 충분합니다. 다른 해석은 변명입니다',
                 weakness: true,
                 contradictionEvidenceKey: 'staged_accident',
-                failMsg: '탄 자국과 사망 시각을 조합해 감전사 위장 정황을 만든 뒤 제시하라',
-              },
-            },
-          ],
+                failMsg: '탄 자국과 사망 시각을 조합해 감전사 위장 정황을 만든 뒤 제시하라'
+              }
+            }
+          ]
         },
 
         { type: 'talk', charKey: 'player', text: '이 사건의 본질은 살인이 아니라 감전사입니다' },
-        { type: 'talk', charKey: 'prosecutor', text: '감전사라… 그러면 흉기는 왜 남겼죠' },
-        { type: 'talk', charKey: 'player', text: '위장입니다. 겁을 먹였든, 시선을 돌렸든요' },
 
         { type: 'anim', name: 'cross_start' },
         {
@@ -583,29 +552,29 @@ const GAME_DB = {
               pressQ: '윤비서는 20:45에 사망했습니다. 어떻게 가능한가요',
               press: [
                 { charKey: 'player', text: '분류가 틀릴 가능성은 없나요' },
-                { charKey: 'witness3', face: 'sweat', text: '프레임이 깨지면 흔들릴 수는 있습니다' },
+                { charKey: 'witness3', face: 'sweat', text: '프레임이 깨지면 흔들릴 수는 있습니다' }
               ],
               evolveOnPress: {
                 newText: '프레임 드롭 구간이면 음성 분류는 오탐이 발생할 수 있습니다',
                 weakness: true,
                 contradictionEvidenceKey: 'evolved_voice_log',
-                failMsg: '음성 로그와 CCTV를 조합해 분류 조작 정황을 만든 뒤 제시하라',
-              },
-            },
-          ],
+                failMsg: '음성 로그와 CCTV를 조합해 분류 조작 정황을 만든 뒤 제시하라'
+              }
+            }
+          ]
         },
 
         { type: 'talk', charKey: 'judge', text: '피고인에게 무죄를 선고합니다' },
         { type: 'scene', bgKey: 'ending', bgmKey: 'victory' },
         { type: 'talk', charKey: 'player', text: '선이 끊긴 게 아니라, 누가 끊어 놓은 겁니다' },
-        { type: 'end', text: 'THE END' },
-      ],
-    },
-  ],
+        { type: 'end', text: 'THE END' }
+      ]
+    }
+  ]
 };
 
 /* =========================
-   7) Compile
+   12) Compile
 ========================= */
 function compileGame(db) {
   const baseCase = db.cases?.[0];
@@ -621,7 +590,7 @@ function compileGame(db) {
         charKey: raw.charKey || 'judge',
         text: normalizeKoreanSentence(raw.text),
         face: raw.face || 'normal',
-        bgKey: raw.bgKey || null,
+        bgKey: raw.bgKey || null
       });
       continue;
     }
@@ -646,7 +615,7 @@ function compileGame(db) {
           ? s.press.map((p) => ({
               charKey: p.charKey || 'judge',
               face: p.face || 'normal',
-              text: normalizeKoreanSentence(p.text),
+              text: normalizeKoreanSentence(p.text)
             }))
           : [],
         evolveOnPress: s.evolveOnPress
@@ -654,19 +623,20 @@ function compileGame(db) {
               newText: normalizeKoreanSentence(s.evolveOnPress.newText),
               weakness: !!s.evolveOnPress.weakness,
               contradictionEvidenceKey: s.evolveOnPress.contradictionEvidenceKey || null,
-              failMsg: s.evolveOnPress.failMsg ? normalizeKoreanSentence(s.evolveOnPress.failMsg) : null,
+              failMsg: s.evolveOnPress.failMsg ? normalizeKoreanSentence(s.evolveOnPress.failMsg) : null
             }
           : null,
         weakness: !!s.weakness,
         contradictionEvidenceKey: s.contradictionEvidenceKey || null,
-        failMsg: s.failMsg ? normalizeKoreanSentence(s.failMsg) : null,
+        failMsg: s.failMsg ? normalizeKoreanSentence(s.failMsg) : null
       }));
+
       lines.push({
         type: 'cross_exam',
         title: raw.title || '심문',
         bgKey: raw.bgKey || 'court',
         witnessCharKey: raw.witnessCharKey || 'witness1',
-        statements,
+        statements
       });
       continue;
     }
@@ -682,12 +652,12 @@ function compileGame(db) {
     combinations: db.combinations || [],
     lines,
     initialEvidence: baseCase?.initialEvidence || [],
-    apMax: baseCase?.apMax ?? 5,
+    apMax: baseCase?.apMax ?? 5
   };
 }
 
 /* =========================
-   8) Reducer + History (Prev)
+   13) Reducer + History
 ========================= */
 const AT = {
   RESET: 'RESET',
@@ -698,8 +668,7 @@ const AT = {
   PRESENT: 'PRESENT',
   OPEN_EVIDENCE: 'OPEN_EVIDENCE',
   CLOSE_EVIDENCE: 'CLOSE_EVIDENCE',
-  HYDRATE: 'HYDRATE',
-  PUSH_HISTORY: 'PUSH_HISTORY',
+  HYDRATE: 'HYDRATE'
 };
 
 function initialState(game) {
@@ -716,12 +685,12 @@ function initialState(game) {
     evolved: {},
     ending: false,
     gameOver: false,
-    // ✅ history snapshots for Prev
-    history: [],
+    history: []
   };
 }
 
 function stripHistory(s) {
+  // keep everything except history itself
   const { history, ...rest } = s;
   return rest;
 }
@@ -749,18 +718,16 @@ function reducer(game, state, action) {
       const evolved = !!st.evolved?.[base.id];
       const hasEvolve = !!base.evolveOnPress;
       const isWeak = !!merged?.weakness;
-      if (isWeak) return i;
-      if (hasEvolve && !evolved) return i;
+      if (isWeak) return i;                // needs Present
+      if (hasEvolve && !evolved) return i; // needs Press
     }
     return -1;
   };
 
-  const pushHistoryIfMove = (nextState) => {
-    // history에는 “이동 전 상태”를 넣는다
+  const pushHistory = (nextState) => {
     const snap = stripHistory(state);
     const hist = state.history ? state.history.slice() : [];
     hist.push(snap);
-    // 히스토리 너무 커지는 것 방지(200)
     if (hist.length > 200) hist.shift();
     return { ...nextState, history: hist };
   };
@@ -781,17 +748,17 @@ function reducer(game, state, action) {
       if (!line || line.type !== 'cross_exam') return state;
       const s = getMergedStatementAt(state.ceIndex, state);
       if (!s?.press?.length) return state;
-      return pushHistoryIfMove({ ...state, pressMode: true, pressIndex: 0 });
+      return pushHistory({ ...state, pressMode: true, pressIndex: 0 });
     }
 
     case AT.PRESS_NEXT: {
       if (!state.pressMode) return state;
       const s = getMergedStatementAt(state.ceIndex, state);
       const n = s?.press?.length || 0;
-      if (n <= 0) return pushHistoryIfMove({ ...state, pressMode: false, pressIndex: 0 });
+      if (n <= 0) return pushHistory({ ...state, pressMode: false, pressIndex: 0 });
 
       const last = state.pressIndex >= n - 1;
-      if (!last) return pushHistoryIfMove({ ...state, pressIndex: state.pressIndex + 1 });
+      if (!last) return pushHistory({ ...state, pressIndex: state.pressIndex + 1 });
 
       const L = lines[state.idx];
       const base = L?.statements?.[state.ceIndex];
@@ -802,11 +769,11 @@ function reducer(game, state, action) {
           text: evo.newText,
           weakness: !!evo.weakness,
           contradictionEvidenceKey: evo.contradictionEvidenceKey,
-          failMsg: evo.failMsg,
+          failMsg: evo.failMsg
         };
-        return pushHistoryIfMove({ ...state, evolved: nextEvolved, pressMode: false, pressIndex: 0 });
+        return pushHistory({ ...state, evolved: nextEvolved, pressMode: false, pressIndex: 0 });
       }
-      return pushHistoryIfMove({ ...state, pressMode: false, pressIndex: 0 });
+      return pushHistory({ ...state, pressMode: false, pressIndex: 0 });
     }
 
     case AT.PRESENT: {
@@ -819,7 +786,6 @@ function reducer(game, state, action) {
       const presented = action.key;
 
       if (isWeak && correctKey && presented === correctKey) {
-        // clear weakness in evolved entry if present
         const L = lines[state.idx];
         const base = L?.statements?.[state.ceIndex];
         const evolvedNext = { ...(state.evolved || {}) };
@@ -836,16 +802,16 @@ function reducer(game, state, action) {
         const unresolved = findUnresolvedIndex(tmp);
 
         if (unresolved >= 0) {
-          return pushHistoryIfMove({ ...tmp, ceIndex: unresolved });
+          return pushHistory({ ...tmp, ceIndex: unresolved });
         }
 
         const nextIdx = clamp(state.idx + 1, 0, lines.length - 1);
         const nextLine = lines[nextIdx];
-        return pushHistoryIfMove({ ...tmp, idx: nextIdx, bgKey: nextLine?.bgKey || tmp.bgKey, ceIndex: 0 });
+        return pushHistory({ ...tmp, idx: nextIdx, bgKey: nextLine?.bgKey || tmp.bgKey, ceIndex: 0 });
       }
 
       const hp = Math.max(0, state.hp - 1);
-      return pushHistoryIfMove({ ...state, hp, gameOver: hp <= 0 });
+      return pushHistory({ ...state, hp, gameOver: hp <= 0 });
     }
 
     case AT.NEXT: {
@@ -857,10 +823,10 @@ function reducer(game, state, action) {
       if (line.type === 'scene' || line.type === 'anim') {
         const nextIdx = clamp(state.idx + 1, 0, lines.length - 1);
         const nextLine = lines[nextIdx];
-        return pushHistoryIfMove({ ...state, idx: nextIdx, bgKey: nextLine?.bgKey || state.bgKey });
+        return pushHistory({ ...state, idx: nextIdx, bgKey: nextLine?.bgKey || state.bgKey });
       }
 
-      if (line.type === 'end') return pushHistoryIfMove({ ...state, ending: true });
+      if (line.type === 'end') return pushHistory({ ...state, ending: true });
 
       if (line.type === 'cross_exam') {
         const total = line.statements?.length || 0;
@@ -869,24 +835,24 @@ function reducer(game, state, action) {
         if (last) {
           const unresolved = findUnresolvedIndex(state);
           if (unresolved >= 0) {
-            return pushHistoryIfMove({ ...state, ceIndex: unresolved });
+            // block progression
+            return pushHistory({ ...state, ceIndex: unresolved });
           }
           const nextIdx = clamp(state.idx + 1, 0, lines.length - 1);
           const nextLine = lines[nextIdx];
-          return pushHistoryIfMove({ ...state, idx: nextIdx, bgKey: nextLine?.bgKey || state.bgKey, ceIndex: 0 });
+          return pushHistory({ ...state, idx: nextIdx, bgKey: nextLine?.bgKey || state.bgKey, ceIndex: 0 });
         }
 
-        return pushHistoryIfMove({ ...state, ceIndex: state.ceIndex + 1 });
+        return pushHistory({ ...state, ceIndex: state.ceIndex + 1 });
       }
 
       // talk
       const nextIdx = clamp(state.idx + 1, 0, lines.length - 1);
       const nextLine = lines[nextIdx];
-      return pushHistoryIfMove({ ...state, idx: nextIdx, bgKey: nextLine?.bgKey || state.bgKey });
+      return pushHistory({ ...state, idx: nextIdx, bgKey: nextLine?.bgKey || state.bgKey });
     }
 
     case AT.PREV: {
-      // ✅ 되감기: history가 있으면 마지막 스냅샷 복원
       const hist = state.history || [];
       if (hist.length <= 0) return state;
       const prevSnap = hist[hist.length - 1];
@@ -900,13 +866,8 @@ function reducer(game, state, action) {
 }
 
 /* =========================
-   9) View
+   14) View
 ========================= */
-function pickAvatar(char, face) {
-  const a = char?.avatars || {};
-  return a?.[face] || a?.normal || null;
-}
-
 function deriveView(game, state) {
   const lines = game.lines || [];
   const line = lines[state.idx];
@@ -929,7 +890,8 @@ function deriveView(game, state) {
   })();
 
   const speaker = chars[speakerKey] || chars.judge;
-  const face = pressItem?.face || (line?.type === 'talk' ? (line.face || 'normal') : 'normal');
+  const face = pressItem?.face || 'normal';
+  const avatar = pickAvatar(speaker, face);
 
   const text = (() => {
     if (state.pressMode && pressItem?.text) return pressItem.text;
@@ -948,33 +910,11 @@ function deriveView(game, state) {
     return '';
   })();
 
-  return {
-    line,
-    bgKey,
-    bgClass,
-    isCE,
-    ceTitle: isCE ? line.title : '',
-    ceIndex: isCE ? state.ceIndex : 0,
-    ceTotal: isCE ? (line.statements?.length || 0) : 0,
-    stmt,
-    speaker,
-    face,
-    avatar: pickAvatar(speaker, face),
-    text,
-    hint,
-  };
+  return { line, bgKey, bgClass, isCE, ceTitle: isCE ? line.title : '', ceIndex: isCE ? state.ceIndex : 0, ceTotal: isCE ? (line.statements?.length || 0) : 0, stmt, speaker, avatar, text, hint };
 }
 
 /* =========================
-   10) Evidence helpers
-========================= */
-function findCombination(combos, a, b) {
-  const req = [a, b].sort().join('::');
-  return (combos || []).find((c) => (c.req || []).slice().sort().join('::') === req) || null;
-}
-
-/* =========================
-   11) UI
+   15) Modals
 ========================= */
 function ModalShell({ open, onClose, title, icon, children, footer }) {
   if (!open) return null;
@@ -1205,32 +1145,10 @@ function SaveLoadModal({ open, onClose, onSave, onLoad, onDelete }) {
 }
 
 /* =========================
-   12) Page
+   16) Page
 ========================= */
 export default function Page() {
   const audio = useAudioBus();
-
-  // error overlay
-  const [runtimeErr, setRuntimeErr] = useState(null);
-  useEffect(() => {
-    const onError = (event) => {
-      const msg = event?.error?.message || event?.message || 'Unknown error';
-      const stack = event?.error?.stack || '';
-      setRuntimeErr({ type: 'error', msg, stack });
-    };
-    const onRej = (event) => {
-      const reason = event?.reason;
-      const msg = reason?.message || String(reason || 'Unhandled rejection');
-      const stack = reason?.stack || '';
-      setRuntimeErr({ type: 'rejection', msg, stack });
-    };
-    window.addEventListener('error', onError);
-    window.addEventListener('unhandledrejection', onRej);
-    return () => {
-      window.removeEventListener('error', onError);
-      window.removeEventListener('unhandledrejection', onRej);
-    };
-  }, []);
 
   const game = useMemo(() => compileGame(GAME_DB), []);
   const [state, dispatch] = useReducer((s, a) => reducer(game, s, a), undefined, () => initialState(game));
@@ -1238,6 +1156,7 @@ export default function Page() {
 
   const [muted, setMuted] = useState(false);
   const [bgUrl, setBgUrl] = useState(null);
+
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [combineOpen, setCombineOpen] = useState(false);
   const [examineOpen, setExamineOpen] = useState(false);
@@ -1257,7 +1176,6 @@ export default function Page() {
   const doOverlay = (t, ms = 1000) => (setOverlayMsg(t), setTimeout(() => setOverlayMsg(null), ms));
   const doEffect = (t, ms = 850) => (setEffectText(t), setTimeout(() => setEffectText(null), ms));
 
-  // debounce both next/prev
   const lastMoveRef = useRef(0);
   const canMove = () => {
     const t = nowMs();
@@ -1278,18 +1196,18 @@ export default function Page() {
     await audio.playSfx(k, url).catch(() => {});
   };
 
-  // optional bg image
   useEffect(() => {
+    // optional bg image: /public/assets/bg/<bgKey>.webp
     const candidate = `/assets/bg/${view.bgKey}.webp`;
     preloadImage(candidate).then((ok) => setBgUrl(ok ? candidate : null));
   }, [view.bgKey]);
 
-  // auto-advance scene
+  // scene auto-advance
   useEffect(() => {
     if (view.line?.type === 'scene') dispatch({ type: AT.NEXT });
   }, [view.line?.type]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // anim effects
+  // anim effects + auto-advance
   useEffect(() => {
     if (view.line?.type !== 'anim') return;
     if (view.line.name === 'objection') {
@@ -1306,7 +1224,6 @@ export default function Page() {
     dispatch({ type: AT.NEXT });
   }, [view.line?.type]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // typewriter + blip
   const { shown: typedText, done: typedDone, skip: typedSkip } = useTypewriter(view.text, { enabled: true, cps: view.isCE ? 42 : 34 });
 
   const lastLenRef = useRef(0);
@@ -1341,8 +1258,10 @@ export default function Page() {
     await unlock();
     await sfx('flash');
     doFlash();
+
     const prevHp = state.hp;
     dispatch({ type: AT.PRESENT, key });
+
     setTimeout(async () => {
       if (state.hp < prevHp) {
         doShake();
@@ -1363,6 +1282,7 @@ export default function Page() {
       doOverlay('두 개를 골라야 합니다.');
       return;
     }
+
     const hit = findCombination(game.combinations, a, b);
     setCombineOpen(false);
     setCombineA(null);
@@ -1372,10 +1292,12 @@ export default function Page() {
       doOverlay('조합 결과가 없습니다.');
       return;
     }
+
     if (!state.inv.includes(hit.result)) {
       const inv = Array.from(new Set([...state.inv, hit.result]));
       dispatch({ type: AT.HYDRATE, state: { ...state, inv } });
     }
+
     doOverlay(hit.successMsg || '새 단서를 얻었습니다.');
     await sfx('tap');
   };
@@ -1391,12 +1313,12 @@ export default function Page() {
     await sfx('tap');
   };
 
-  // save/load
   const onSave = async (slot) => {
     const blob = { schema: 1, savedAt: new Date().toISOString(), state, combine: { a: combineA, b: combineB } };
     const res = lsSave(slot, blob);
     return { ok: res.ok, msg: res.ok ? `슬롯 ${slot} 저장 완료` : `저장 실패: ${res.reason}` };
   };
+
   const onLoad = async (slot) => {
     const res = lsLoad(slot);
     if (!res.ok) return { ok: false, msg: `로드 실패: ${res.reason}` };
@@ -1406,6 +1328,7 @@ export default function Page() {
     setCombineB(data?.combine?.b || null);
     return { ok: true, msg: `슬롯 ${slot} 로드 완료` };
   };
+
   const onDelete = async (slot) => {
     const res = lsDelete(slot);
     return { ok: res.ok, msg: res.ok ? `슬롯 ${slot} 삭제 완료` : `삭제 실패: ${res.reason}` };
@@ -1442,18 +1365,8 @@ export default function Page() {
   const pressable = view.isCE && !!view.stmt?.pressQ && (view.stmt?.press?.length || 0) > 0;
 
   return (
-    <div className={`h-screen w-full relative overflow-hidden ${view.bgClass} ${shake ? 'animate-shake' : ''}`} style={bgStyle}>
+    <div className={`h-screen w-full relative overflow-hidden ${view.bgClass}`} style={bgStyle}>
       <style jsx global>{GLOBAL_CSS}</style>
-
-      {runtimeErr ? (
-        <div className="fixed inset-0 z-[9999] bg-black/90 text-white p-4 overflow-auto">
-          <div className="max-w-3xl mx-auto">
-            <div className="text-xl font-bold mb-2">Client Error Captured</div>
-            <div className="text-sm text-rose-200 mb-3">{runtimeErr.type}: {runtimeErr.msg}</div>
-            <pre className="text-xs whitespace-pre-wrap bg-white/5 border border-white/10 rounded-xl p-3">{runtimeErr.stack || '(no stack)'}</pre>
-          </div>
-        </div>
-      ) : null}
 
       <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-black/10 pointer-events-none" />
 
@@ -1523,8 +1436,6 @@ export default function Page() {
         </div>
       ) : null}
 
-      {flash ? <div className="absolute inset-0 z-[50] bg-white/20 pointer-events-none" /> : null}
-
       {/* Character */}
       {speaker ? (
         <div className="absolute inset-x-0 bottom-[220px] md:bottom-[240px] flex items-center justify-center z-20 pointer-events-none">
@@ -1554,7 +1465,7 @@ export default function Page() {
               </div>
             ) : null}
 
-            <div className="relative bg-black/80 border border-white/10 rounded-2xl p-5 md:p-6 min-h-[170px] backdrop-blur-xl">
+            <div className={`relative bg-black/80 border border-white/10 rounded-2xl p-5 md:p-6 min-h-[170px] backdrop-blur-xl ${shake ? 'animate-shake' : ''}`}>
               <div className={`text-lg md:text-xl leading-relaxed ${view.isCE ? 'text-emerald-100' : 'text-white'}`} style={{ fontFamily: 'Inter, sans-serif', fontWeight: 500 }}>
                 {typedText}
                 {!typedDone ? <span className="inline-block w-2">▍</span> : null}
@@ -1608,7 +1519,6 @@ export default function Page() {
                   리셋
                 </button>
 
-                {/* ✅ Prev/Next */}
                 <button
                   onClick={async (e) => { e.preventDefault(); e.stopPropagation(); await onPrev(); }}
                   className="ml-auto px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold flex items-center gap-2"
