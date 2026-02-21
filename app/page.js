@@ -19,13 +19,11 @@ import {
 
 /* =========================================================
    app/page.js — SINGLE FILE (RUNNABLE)
-   ✅ FIX: Pill is not defined
-      - Pill 컴포넌트를 Page보다 "위에" 선언 (SSR/Hoist 문제 방지)
-   ✅ Prev/Next
-   ✅ Prosecutor tone fixed (no "오차율 0%")
-   ✅ Typewriter + Blip
-   ✅ No click-to-advance (buttons only)
-   ✅ Cross exam gate: evolveOnPress(추궁) + weakness(제시) 없으면 통과 불가
+   - Prev/Next (history snapshots)
+   - Typewriter + Blip
+   - Cross exam gate: evolve(Press) / weakness(Present) 없으면 진행 불가
+   - Evidence Present / Examine(hotspot) / Combine
+   - Save/Load
 ========================================================= */
 
 /* =========================
@@ -48,7 +46,7 @@ html,body{height:100%}
 `;
 
 /* =========================
-   1) UI Primitive (MUST be above Page)
+   1) UI primitives (must exist)
 ========================= */
 function Pill({ children }) {
   return <div className="px-4 py-2 rounded-full border border-white/10 bg-black/45 backdrop-blur-md">{children}</div>;
@@ -64,7 +62,6 @@ const uid = (p = 'id') => `${p}_${Math.random().toString(36).slice(2, 10)}_${Dat
 function nowMs() {
   return typeof performance !== 'undefined' ? performance.now() : Date.now();
 }
-
 function safeJSONParse(s, fb = null) {
   try {
     return JSON.parse(s);
@@ -72,16 +69,13 @@ function safeJSONParse(s, fb = null) {
     return fb;
   }
 }
-
 function normalizeKoreanSentence(raw) {
   const s0 = String(raw ?? '').trim();
   if (!s0) return s0;
   const last = s0[s0.length - 1];
   if (['.', '!', '?', '…'].includes(last)) return s0;
   if (last === ')' || last === ']' || last === '"' || last === "'") return s0;
-
   if (/(까|나요|습니까|죠)$/.test(s0)) return s0 + '?';
-
   if (
     s0.endsWith('다') ||
     s0.endsWith('요') ||
@@ -97,6 +91,11 @@ function normalizeKoreanSentence(raw) {
     return s0 + '.';
   }
   return s0 + '.';
+}
+function pickAvatar(char, face = 'normal') {
+  const a = char?.avatars || {};
+  if (a && typeof a === 'object') return a[face] || a.normal || null;
+  return null;
 }
 
 /* =========================
@@ -115,7 +114,6 @@ function useTypewriter(text, { enabled = true, cps = 34 } = {}) {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     rafRef.current = null;
   };
-
   const skip = () => {
     stop();
     idxRef.current = full.length;
@@ -212,7 +210,7 @@ function lsDelete(slot) {
 }
 
 /* =========================
-   5) Audio (BGM/SFX + Blip)
+   5) Audio (SFX/BGM + Blip)
 ========================= */
 function makeAudio(url, { loop = false, volume = 1 } = {}) {
   const a = new Audio(url);
@@ -376,7 +374,7 @@ function useAudioBus() {
 }
 
 /* =========================
-   6) Optional BG image preload
+   6) Optional BG preload
 ========================= */
 function preloadImage(url) {
   return new Promise((resolve) => {
@@ -390,7 +388,7 @@ function preloadImage(url) {
 }
 
 /* =========================
-   7) GAME_DB
+   7) GAME_DB (content)
 ========================= */
 const GAME_DB = {
   meta: { title: '에피소드 1: 단선된 진실', description: '로그와 분류가 진실을 가장한다. 첫 재판에서 그 착각을 부순다.' },
@@ -409,18 +407,39 @@ const GAME_DB = {
     witness1: {
       name: '박경비',
       color: '#10B981',
-      avatars: { normal: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%2310B981'/%3E%3Ctext x='50' y='62' font-size='28' text-anchor='middle' fill='white'%3E경비%3C/text%3E%3C/svg%3E", sweat: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23F59E0B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😰%3C/text%3E%3C/svg%3E", crazy: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23991B1B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E🤯%3C/text%3E%3C/svg%3E" }
+      avatars: {
+        normal:
+          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%2310B981'/%3E%3Ctext x='50' y='62' font-size='28' text-anchor='middle' fill='white'%3E경비%3C/text%3E%3C/svg%3E",
+        sweat:
+          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23F59E0B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😰%3C/text%3E%3C/svg%3E",
+        crazy:
+          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23991B1B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E🤯%3C/text%3E%3C/svg%3E",
+      },
     },
     witness2: {
       name: '최실장',
       color: '#8B5CF6',
-      avatars: { normal: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%238B5CF6'/%3E%3Ctext x='50' y='62' font-size='28' text-anchor='middle' fill='white'%3EIT%3C/text%3E%3C/svg%3E", sweat: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23F59E0B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😰%3C/text%3E%3C/svg%3E", crazy: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23991B1B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😈%3C/text%3E%3C/svg%3E" }
+      avatars: {
+        normal:
+          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%238B5CF6'/%3E%3Ctext x='50' y='62' font-size='28' text-anchor='middle' fill='white'%3EIT%3C/text%3E%3C/svg%3E",
+        sweat:
+          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23F59E0B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😰%3C/text%3E%3C/svg%3E",
+        crazy:
+          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23991B1B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😈%3C/text%3E%3C/svg%3E",
+      },
     },
     witness3: {
       name: '윤기사',
       color: '#06B6D4',
-      avatars: { normal: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%2306B6D4'/%3E%3Ctext x='50' y='62' font-size='28' text-anchor='middle' fill='white'%3E기사%3C/text%3E%3C/svg%3E", sweat: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23F59E0B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😰%3C/text%3E%3C/svg%3E", crazy: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23991B1B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😡%3C/text%3E%3C/svg%3E" }
-    }
+      avatars: {
+        normal:
+          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%2306B6D4'/%3E%3Ctext x='50' y='62' font-size='28' text-anchor='middle' fill='white'%3E기사%3C/text%3E%3C/svg%3E",
+        sweat:
+          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23F59E0B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😰%3C/text%3E%3C/svg%3E",
+        crazy:
+          "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%23991B1B'/%3E%3Ctext x='50' y='62' font-size='34' text-anchor='middle' fill='white'%3E😡%3C/text%3E%3C/svg%3E",
+      },
+    },
   },
   evidence: {
     autopsy: { name: '검시 소견서', icon: '🧾', desc: '사인은 둔기성 두부 손상이며, 사망 추정 시각은 21:00이다.' },
@@ -435,20 +454,18 @@ const GAME_DB = {
       examine: {
         bg: 'bg-slate-800 text-gray-200',
         content: '[압수품]\n금속 부품이다.\n끝부분 변색이 이상하다.',
-        hotspots: [
-          { id: 'burn_mark', x: 78, y: 38, width: 16, height: 22, resultEvidenceKey: 'electric_burn', successMsg: '고전압 스파크에 의한 탄 자국이다.' }
-        ],
+        hotspots: [{ id: 'burn_mark', x: 78, y: 38, width: 16, height: 22, resultEvidenceKey: 'electric_burn', successMsg: '고전압 스파크에 의한 탄 자국이다.' }],
       },
     },
     electric_burn: { name: '탄 자국', icon: '⚡', desc: '금속이 국부적으로 용융된 흔적이다.' },
     real_time_of_death: { name: '진짜 사망 시각', icon: '⏱️', desc: '스마트워치 기록에 따르면 사망은 20:45이다.' },
     staged_accident: { name: '감전사 위장', icon: '💀', desc: '감전사 이후 사후 타격으로 살인처럼 위장되었다.' },
-    evolved_voice_log: { name: '분류 조작 정황', icon: '🧩', desc: '프레임 드롭과 분류 편향으로 태깅 오류가 가능하다.' }
+    evolved_voice_log: { name: '분류 조작 정황', icon: '🧩', desc: '프레임 드롭과 분류 편향으로 태깅 오류가 가능하다.' },
   },
   combinations: [
     { req: ['autopsy', 'smartwatch_data'], result: 'real_time_of_death', successMsg: '부검과 워치를 합치면, 진짜 사망 시각은 20:45로 고정된다.' },
     { req: ['real_time_of_death', 'electric_burn'], result: 'staged_accident', successMsg: '탄 자국과 사망 시각이 맞물린다. 감전사 위장 정황이 완성된다.' },
-    { req: ['voice_print', 'hall_cctv'], result: 'evolved_voice_log', successMsg: '영상이 깨진 구간에서 음성 분류는 조작될 수 있다.' }
+    { req: ['voice_print', 'hall_cctv'], result: 'evolved_voice_log', successMsg: '영상이 깨진 구간에서 음성 분류는 조작될 수 있다.' },
   ],
   cases: [
     {
@@ -475,16 +492,16 @@ const GAME_DB = {
               pressQ: '문이 열렸다는 근거가 있나요',
               press: [
                 { charKey: 'player', text: '도어락 기록은 확인했나요' },
-                { charKey: 'witness1', face: 'sweat', text: '그때는 몰랐습니다. 저는 그냥 눈으로 봤습니다' }
+                { charKey: 'witness1', face: 'sweat', text: '그때는 몰랐습니다. 저는 그냥 눈으로 봤습니다' },
               ],
               evolveOnPress: {
                 newText: '문이 열렸다고 생각했지만, 도어락 로그를 보니 열림 기록이 없었다고 들었습니다',
                 weakness: true,
                 contradictionEvidenceKey: 'server_log',
-                failMsg: '도어락 로그를 제시해서, 문이 열리지 않았음을 입증하라'
-              }
-            }
-          ]
+                failMsg: '도어락 로그를 제시해서, 문이 열리지 않았음을 입증하라',
+              },
+            },
+          ],
         },
 
         { type: 'anim', name: 'objection' },
@@ -499,14 +516,8 @@ const GAME_DB = {
           witnessCharKey: 'prosecutor',
           bgKey: 'tense',
           statements: [
-            {
-              id: 'p_01',
-              text: '부검 소견서는 21시를 가리킵니다. 결론은 단순합니다',
-              weakness: true,
-              contradictionEvidenceKey: 'real_time_of_death',
-              failMsg: '부검과 스마트워치를 조합해 진짜 사망 시각을 만든 뒤 제시하라'
-            }
-          ]
+            { id: 'p_01', text: '부검 소견서는 21시를 가리킵니다. 결론은 단순합니다', weakness: true, contradictionEvidenceKey: 'real_time_of_death', failMsg: '부검과 스마트워치를 조합해 진짜 사망 시각을 만든 뒤 제시하라' },
+          ],
         },
 
         { type: 'talk', charKey: 'player', text: '선이 연결됐습니다. 심정지는 20:45입니다' },
@@ -525,16 +536,16 @@ const GAME_DB = {
               pressQ: '피가 있으면 무조건 살인인가요',
               press: [
                 { charKey: 'player', text: '끝부분 변색은 확인했나요' },
-                { charKey: 'witness2', face: 'sweat', text: '그런 건 중요하지 않습니다. 피가 먼저죠' }
+                { charKey: 'witness2', face: 'sweat', text: '그런 건 중요하지 않습니다. 피가 먼저죠' },
               ],
               evolveOnPress: {
                 newText: '피가 묻은 흉기면 충분합니다. 다른 해석은 변명입니다',
                 weakness: true,
                 contradictionEvidenceKey: 'staged_accident',
-                failMsg: '탄 자국과 사망 시각을 조합해 감전사 위장 정황을 만든 뒤 제시하라'
-              }
-            }
-          ]
+                failMsg: '탄 자국과 사망 시각을 조합해 감전사 위장 정황을 만든 뒤 제시하라',
+              },
+            },
+          ],
         },
 
         { type: 'talk', charKey: 'player', text: '이 사건의 본질은 살인이 아니라 감전사입니다' },
@@ -552,29 +563,29 @@ const GAME_DB = {
               pressQ: '윤비서는 20:45에 사망했습니다. 어떻게 가능한가요',
               press: [
                 { charKey: 'player', text: '분류가 틀릴 가능성은 없나요' },
-                { charKey: 'witness3', face: 'sweat', text: '프레임이 깨지면 흔들릴 수는 있습니다' }
+                { charKey: 'witness3', face: 'sweat', text: '프레임이 깨지면 흔들릴 수는 있습니다' },
               ],
               evolveOnPress: {
                 newText: '프레임 드롭 구간이면 음성 분류는 오탐이 발생할 수 있습니다',
                 weakness: true,
                 contradictionEvidenceKey: 'evolved_voice_log',
-                failMsg: '음성 로그와 CCTV를 조합해 분류 조작 정황을 만든 뒤 제시하라'
-              }
-            }
-          ]
+                failMsg: '음성 로그와 CCTV를 조합해 분류 조작 정황을 만든 뒤 제시하라',
+              },
+            },
+          ],
         },
 
         { type: 'talk', charKey: 'judge', text: '피고인에게 무죄를 선고합니다' },
         { type: 'scene', bgKey: 'ending', bgmKey: 'victory' },
         { type: 'talk', charKey: 'player', text: '선이 끊긴 게 아니라, 누가 끊어 놓은 겁니다' },
-        { type: 'end', text: 'THE END' }
-      ]
-    }
-  ]
+        { type: 'end', text: 'THE END' },
+      ],
+    },
+  ],
 };
 
 /* =========================
-   12) Compile
+   8) Compile
 ========================= */
 function compileGame(db) {
   const baseCase = db.cases?.[0];
@@ -585,13 +596,7 @@ function compileGame(db) {
     if (!raw || !raw.type) continue;
 
     if (raw.type === 'talk') {
-      lines.push({
-        type: 'talk',
-        charKey: raw.charKey || 'judge',
-        text: normalizeKoreanSentence(raw.text),
-        face: raw.face || 'normal',
-        bgKey: raw.bgKey || null
-      });
+      lines.push({ type: 'talk', charKey: raw.charKey || 'judge', text: normalizeKoreanSentence(raw.text), face: raw.face || 'normal', bgKey: raw.bgKey || null });
       continue;
     }
     if (raw.type === 'scene') {
@@ -611,33 +616,21 @@ function compileGame(db) {
         id: s.id || uid('stmt'),
         text: normalizeKoreanSentence(s.text),
         pressQ: s.pressQ ? normalizeKoreanSentence(s.pressQ) : null,
-        press: Array.isArray(s.press)
-          ? s.press.map((p) => ({
-              charKey: p.charKey || 'judge',
-              face: p.face || 'normal',
-              text: normalizeKoreanSentence(p.text)
-            }))
-          : [],
+        press: Array.isArray(s.press) ? s.press.map((p) => ({ charKey: p.charKey || 'judge', face: p.face || 'normal', text: normalizeKoreanSentence(p.text) })) : [],
         evolveOnPress: s.evolveOnPress
           ? {
               newText: normalizeKoreanSentence(s.evolveOnPress.newText),
               weakness: !!s.evolveOnPress.weakness,
               contradictionEvidenceKey: s.evolveOnPress.contradictionEvidenceKey || null,
-              failMsg: s.evolveOnPress.failMsg ? normalizeKoreanSentence(s.evolveOnPress.failMsg) : null
+              failMsg: s.evolveOnPress.failMsg ? normalizeKoreanSentence(s.evolveOnPress.failMsg) : null,
             }
           : null,
         weakness: !!s.weakness,
         contradictionEvidenceKey: s.contradictionEvidenceKey || null,
-        failMsg: s.failMsg ? normalizeKoreanSentence(s.failMsg) : null
+        failMsg: s.failMsg ? normalizeKoreanSentence(s.failMsg) : null,
       }));
 
-      lines.push({
-        type: 'cross_exam',
-        title: raw.title || '심문',
-        bgKey: raw.bgKey || 'court',
-        witnessCharKey: raw.witnessCharKey || 'witness1',
-        statements
-      });
+      lines.push({ type: 'cross_exam', title: raw.title || '심문', bgKey: raw.bgKey || 'court', witnessCharKey: raw.witnessCharKey || 'witness1', statements });
       continue;
     }
 
@@ -652,12 +645,12 @@ function compileGame(db) {
     combinations: db.combinations || [],
     lines,
     initialEvidence: baseCase?.initialEvidence || [],
-    apMax: baseCase?.apMax ?? 5
+    apMax: baseCase?.apMax ?? 5,
   };
 }
 
 /* =========================
-   13) Reducer + History
+   9) Reducer + History
 ========================= */
 const AT = {
   RESET: 'RESET',
@@ -668,7 +661,7 @@ const AT = {
   PRESENT: 'PRESENT',
   OPEN_EVIDENCE: 'OPEN_EVIDENCE',
   CLOSE_EVIDENCE: 'CLOSE_EVIDENCE',
-  HYDRATE: 'HYDRATE'
+  HYDRATE: 'HYDRATE',
 };
 
 function initialState(game) {
@@ -685,12 +678,11 @@ function initialState(game) {
     evolved: {},
     ending: false,
     gameOver: false,
-    history: []
+    history: [],
   };
 }
 
 function stripHistory(s) {
-  // keep everything except history itself
   const { history, ...rest } = s;
   return rest;
 }
@@ -699,27 +691,27 @@ function reducer(game, state, action) {
   const lines = game.lines || [];
   const line = lines[state.idx];
 
-  const getMergedStatementAt = (i, st) => {
+  const getMergedStmtAt = (st, i) => {
     const L = lines[st.idx];
     if (!L || L.type !== 'cross_exam') return null;
-    const s0 = L.statements?.[i] || null;
-    if (!s0) return null;
-    const ev = st.evolved?.[s0.id];
-    return ev ? { ...s0, ...ev } : s0;
+    const base = L.statements?.[i] || null;
+    if (!base) return null;
+    const ev = st.evolved?.[base.id];
+    return ev ? { ...base, ...ev } : base;
   };
 
-  const findUnresolvedIndex = (st) => {
+  const findUnresolved = (st) => {
     const L = lines[st.idx];
     if (!L || L.type !== 'cross_exam') return -1;
     const stmts = L.statements || [];
     for (let i = 0; i < stmts.length; i++) {
       const base = stmts[i];
-      const merged = getMergedStatementAt(i, st);
+      const merged = getMergedStmtAt(st, i);
       const evolved = !!st.evolved?.[base.id];
       const hasEvolve = !!base.evolveOnPress;
       const isWeak = !!merged?.weakness;
-      if (isWeak) return i;                // needs Present
-      if (hasEvolve && !evolved) return i; // needs Press
+      if (isWeak) return i;
+      if (hasEvolve && !evolved) return i;
     }
     return -1;
   };
@@ -746,31 +738,25 @@ function reducer(game, state, action) {
 
     case AT.PRESS: {
       if (!line || line.type !== 'cross_exam') return state;
-      const s = getMergedStatementAt(state.ceIndex, state);
+      const s = getMergedStmtAt(state, state.ceIndex);
       if (!s?.press?.length) return state;
       return pushHistory({ ...state, pressMode: true, pressIndex: 0 });
     }
 
     case AT.PRESS_NEXT: {
       if (!state.pressMode) return state;
-      const s = getMergedStatementAt(state.ceIndex, state);
+      const s = getMergedStmtAt(state, state.ceIndex);
       const n = s?.press?.length || 0;
       if (n <= 0) return pushHistory({ ...state, pressMode: false, pressIndex: 0 });
 
       const last = state.pressIndex >= n - 1;
       if (!last) return pushHistory({ ...state, pressIndex: state.pressIndex + 1 });
 
-      const L = lines[state.idx];
-      const base = L?.statements?.[state.ceIndex];
+      const base = line?.statements?.[state.ceIndex];
       const evo = s?.evolveOnPress;
       if (base && evo) {
         const nextEvolved = { ...(state.evolved || {}) };
-        nextEvolved[base.id] = {
-          text: evo.newText,
-          weakness: !!evo.weakness,
-          contradictionEvidenceKey: evo.contradictionEvidenceKey,
-          failMsg: evo.failMsg
-        };
+        nextEvolved[base.id] = { text: evo.newText, weakness: !!evo.weakness, contradictionEvidenceKey: evo.contradictionEvidenceKey, failMsg: evo.failMsg };
         return pushHistory({ ...state, evolved: nextEvolved, pressMode: false, pressIndex: 0 });
       }
       return pushHistory({ ...state, pressMode: false, pressIndex: 0 });
@@ -778,18 +764,14 @@ function reducer(game, state, action) {
 
     case AT.PRESENT: {
       if (!line || line.type !== 'cross_exam') return state;
-      const s = getMergedStatementAt(state.ceIndex, state);
+      const s = getMergedStmtAt(state, state.ceIndex);
       if (!s) return state;
 
-      const isWeak = !!s.weakness;
-      const correctKey = s.contradictionEvidenceKey;
-      const presented = action.key;
-
-      if (isWeak && correctKey && presented === correctKey) {
-        const L = lines[state.idx];
-        const base = L?.statements?.[state.ceIndex];
+      if (s.weakness && s.contradictionEvidenceKey && action.key === s.contradictionEvidenceKey) {
+        const base = line?.statements?.[state.ceIndex];
         const evolvedNext = { ...(state.evolved || {}) };
 
+        // clear weakness if it came from evolve
         if (base?.id && evolvedNext[base.id]) {
           const keep = { ...evolvedNext[base.id] };
           delete keep.weakness;
@@ -799,11 +781,9 @@ function reducer(game, state, action) {
         }
 
         const tmp = { ...state, evolved: evolvedNext, pressMode: false, pressIndex: 0, evidenceOpen: false };
-        const unresolved = findUnresolvedIndex(tmp);
+        const unresolved = findUnresolved(tmp);
 
-        if (unresolved >= 0) {
-          return pushHistory({ ...tmp, ceIndex: unresolved });
-        }
+        if (unresolved >= 0) return pushHistory({ ...tmp, ceIndex: unresolved });
 
         const nextIdx = clamp(state.idx + 1, 0, lines.length - 1);
         const nextLine = lines[nextIdx];
@@ -831,22 +811,16 @@ function reducer(game, state, action) {
       if (line.type === 'cross_exam') {
         const total = line.statements?.length || 0;
         const last = state.ceIndex >= total - 1;
-
         if (last) {
-          const unresolved = findUnresolvedIndex(state);
-          if (unresolved >= 0) {
-            // block progression
-            return pushHistory({ ...state, ceIndex: unresolved });
-          }
+          const unresolved = findUnresolved(state);
+          if (unresolved >= 0) return pushHistory({ ...state, ceIndex: unresolved });
           const nextIdx = clamp(state.idx + 1, 0, lines.length - 1);
           const nextLine = lines[nextIdx];
           return pushHistory({ ...state, idx: nextIdx, bgKey: nextLine?.bgKey || state.bgKey, ceIndex: 0 });
         }
-
         return pushHistory({ ...state, ceIndex: state.ceIndex + 1 });
       }
 
-      // talk
       const nextIdx = clamp(state.idx + 1, 0, lines.length - 1);
       const nextLine = lines[nextIdx];
       return pushHistory({ ...state, idx: nextIdx, bgKey: nextLine?.bgKey || state.bgKey });
@@ -866,12 +840,13 @@ function reducer(game, state, action) {
 }
 
 /* =========================
-   14) View
+   10) View
 ========================= */
 function deriveView(game, state) {
   const lines = game.lines || [];
   const line = lines[state.idx];
   const chars = game.characters || {};
+
   const bgKey = state.bgKey || line?.bgKey || 'court';
   const bgClass = game.backgrounds?.[bgKey] || 'bg-gradient-to-b from-slate-950 via-slate-900 to-black';
 
@@ -910,11 +885,32 @@ function deriveView(game, state) {
     return '';
   })();
 
-  return { line, bgKey, bgClass, isCE, ceTitle: isCE ? line.title : '', ceIndex: isCE ? state.ceIndex : 0, ceTotal: isCE ? (line.statements?.length || 0) : 0, stmt, speaker, avatar, text, hint };
+  return {
+    line,
+    bgKey,
+    bgClass,
+    isCE,
+    ceTitle: isCE ? line.title : '',
+    ceIndex: isCE ? state.ceIndex : 0,
+    ceTotal: isCE ? (line.statements?.length || 0) : 0,
+    stmt,
+    speaker,
+    avatar,
+    text,
+    hint,
+  };
 }
 
 /* =========================
-   15) Modals
+   11) Evidence helpers
+========================= */
+function findCombination(combos, a, b) {
+  const req = [a, b].sort().join('::');
+  return (combos || []).find((c) => (c.req || []).slice().sort().join('::') === req) || null;
+}
+
+/* =========================
+   12) Modals
 ========================= */
 function ModalShell({ open, onClose, title, icon, children, footer }) {
   if (!open) return null;
@@ -1145,7 +1141,7 @@ function SaveLoadModal({ open, onClose, onSave, onLoad, onDelete }) {
 }
 
 /* =========================
-   16) Page
+   13) Page
 ========================= */
 export default function Page() {
   const audio = useAudioBus();
@@ -1167,12 +1163,10 @@ export default function Page() {
   const [examineKey, setExamineKey] = useState(null);
 
   const [shake, setShake] = useState(false);
-  const [flash, setFlash] = useState(false);
   const [overlayMsg, setOverlayMsg] = useState(null);
   const [effectText, setEffectText] = useState(null);
 
   const doShake = (ms = 320) => (setShake(true), setTimeout(() => setShake(false), ms));
-  const doFlash = (ms = 140) => (setFlash(true), setTimeout(() => setFlash(false), ms));
   const doOverlay = (t, ms = 1000) => (setOverlayMsg(t), setTimeout(() => setOverlayMsg(null), ms));
   const doEffect = (t, ms = 850) => (setEffectText(t), setTimeout(() => setEffectText(null), ms));
 
@@ -1196,13 +1190,13 @@ export default function Page() {
     await audio.playSfx(k, url).catch(() => {});
   };
 
+  // optional bg image
   useEffect(() => {
-    // optional bg image: /public/assets/bg/<bgKey>.webp
     const candidate = `/assets/bg/${view.bgKey}.webp`;
     preloadImage(candidate).then((ok) => setBgUrl(ok ? candidate : null));
   }, [view.bgKey]);
 
-  // scene auto-advance
+  // auto-advance scene
   useEffect(() => {
     if (view.line?.type === 'scene') dispatch({ type: AT.NEXT });
   }, [view.line?.type]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1212,13 +1206,11 @@ export default function Page() {
     if (view.line?.type !== 'anim') return;
     if (view.line.name === 'objection') {
       doEffect('OBJECTION!');
-      doFlash();
       sfx('objection');
     } else if (view.line.name === 'cross_start') {
       doOverlay('CROSS EXAMINATION');
       sfx('tap');
     } else {
-      doFlash();
       sfx('flash');
     }
     dispatch({ type: AT.NEXT });
@@ -1257,8 +1249,6 @@ export default function Page() {
   const doPresent = async (key) => {
     await unlock();
     await sfx('flash');
-    doFlash();
-
     const prevHp = state.hp;
     dispatch({ type: AT.PRESENT, key });
 
@@ -1282,8 +1272,8 @@ export default function Page() {
       doOverlay('두 개를 골라야 합니다.');
       return;
     }
-
     const hit = findCombination(game.combinations, a, b);
+
     setCombineOpen(false);
     setCombineA(null);
     setCombineB(null);
@@ -1334,6 +1324,7 @@ export default function Page() {
     return { ok: res.ok, msg: res.ok ? `슬롯 ${slot} 삭제 완료` : `삭제 실패: ${res.reason}` };
   };
 
+  // Gameover / Ending (simple)
   if (state.gameOver) {
     return (
       <div className={`min-h-screen ${GAME_DB.backgrounds.gameover} text-white flex items-center justify-center p-6`} style={bgStyle}>
@@ -1365,7 +1356,7 @@ export default function Page() {
   const pressable = view.isCE && !!view.stmt?.pressQ && (view.stmt?.press?.length || 0) > 0;
 
   return (
-    <div className={`h-screen w-full relative overflow-hidden ${view.bgClass}`} style={bgStyle}>
+    <div className={`h-screen w-full relative overflow-hidden ${view.bgClass} ${shake ? 'animate-shake' : ''}`} style={bgStyle}>
       <style jsx global>{GLOBAL_CSS}</style>
 
       <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-black/10 pointer-events-none" />
@@ -1465,7 +1456,7 @@ export default function Page() {
               </div>
             ) : null}
 
-            <div className={`relative bg-black/80 border border-white/10 rounded-2xl p-5 md:p-6 min-h-[170px] backdrop-blur-xl ${shake ? 'animate-shake' : ''}`}>
+            <div className="relative bg-black/80 border border-white/10 rounded-2xl p-5 md:p-6 min-h-[170px] backdrop-blur-xl">
               <div className={`text-lg md:text-xl leading-relaxed ${view.isCE ? 'text-emerald-100' : 'text-white'}`} style={{ fontFamily: 'Inter, sans-serif', fontWeight: 500 }}>
                 {typedText}
                 {!typedDone ? <span className="inline-block w-2">▍</span> : null}
@@ -1519,20 +1510,12 @@ export default function Page() {
                   리셋
                 </button>
 
-                <button
-                  onClick={async (e) => { e.preventDefault(); e.stopPropagation(); await onPrev(); }}
-                  className="ml-auto px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold flex items-center gap-2"
-                  style={{ fontFamily: 'Inter, sans-serif' }}
-                >
+                <button onClick={onPrev} className="ml-auto px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/10 font-semibold flex items-center gap-2" style={{ fontFamily: 'Inter, sans-serif' }}>
                   <ChevronLeft className="w-5 h-5" />
                   이전
                 </button>
 
-                <button
-                  onClick={async (e) => { e.preventDefault(); e.stopPropagation(); await onNext(); }}
-                  className="px-5 py-2 rounded-xl bg-white text-black font-black flex items-center gap-2"
-                  style={{ fontFamily: 'Inter, sans-serif' }}
-                >
+                <button onClick={onNext} className="px-5 py-2 rounded-xl bg-white text-black font-black flex items-center gap-2" style={{ fontFamily: 'Inter, sans-serif' }}>
                   다음
                   <ChevronRight className="w-5 h-5" />
                 </button>
