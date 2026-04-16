@@ -2,87 +2,195 @@
 
 import { useEffect, useRef } from 'react';
 import { FX } from '../fx/fxTypes';
+import { getOrderedColorEntries } from '../shared/utils';
 
 export function useRoomLogFX({ roomCode, roomData, players, userId, fx }) {
-  const lastSeenRef = useRef(null);
-  const lastStatusRef = useRef(null);
-  const lastTurnRef = useRef(null);
+  const lastSeenLogSeqRef = useRef(null);
 
   useEffect(() => {
-    lastSeenRef.current = null;
-    lastStatusRef.current = null;
-    lastTurnRef.current = null;
+    lastSeenLogSeqRef.current = null;
   }, [roomCode]);
 
-  useEffect(() => {
-    if (!fx || !roomData) return;
-    const currentId = roomData.turnOrder?.[roomData.turnIndex] || null;
-    if (!currentId) return;
+  const fallbackRect = (x, y) => ({ cx: x, cy: y });
 
-    if (lastTurnRef.current && lastTurnRef.current !== currentId) {
-      const nextName = players.find((player) => player.id === currentId)?.name || '다음 수사관';
-      fx.emit?.(FX.TURN_WAVE, {
-        text: currentId === userId ? '내 차례' : `${nextName} 차례`,
-        at: { cx: (typeof window !== 'undefined' ? window.innerWidth : 360) * 0.5, cy: 82 },
-      });
-    }
-    lastTurnRef.current = currentId;
-  }, [fx, players, roomData, userId]);
 
-  useEffect(() => {
-    if (!fx || !Array.isArray(roomData?.log) || !roomData.log.length) return;
-    const latest = roomData.log[roomData.log.length - 1];
-    const latestSeq = Number(latest?.seq || 0);
-    if (lastSeenRef.current == null) {
-      lastSeenRef.current = latestSeq;
-      return;
-    }
-    if (latestSeq <= lastSeenRef.current) return;
-    lastSeenRef.current = latestSeq;
-
+  const playerMetaKey = Array.isArray(players)
+    ? players.map((player) => `${player.id}:${player.name || ''}:${player.score || 0}`).join('|')
+    : '';
+  const destRectForActor = (actorId) => {
     const w = typeof window !== 'undefined' ? window.innerWidth : 360;
     const h = typeof window !== 'undefined' ? window.innerHeight : 740;
-
-    if (latest?.type === 'COLLECT_LEADS') {
-      fx.emit?.(FX.GEM_BURST_TO_PLAYER, {
-        from: { cx: w * 0.18, cy: h * 0.84 },
-        to: latest.actorId === userId ? { cx: w * 0.5, cy: h * 0.88 } : { cx: w * 0.5, cy: 92 },
-        colors: latest.selected || [],
-      });
-    }
-
-    if (latest?.type === 'SECURE_CLUE' || latest?.type === 'PIN_LEAD' || latest?.type === 'PIN_TOP_LEAD') {
-      fx.emit?.(FX.CARD_FLY_TO_PLAYER, {
-        from: { cx: w * 0.5, cy: h * 0.42 },
-        to: latest.actorId === userId ? { cx: w * 0.5, cy: h * 0.86 } : { cx: w * 0.5, cy: 98 },
-        tier: latest.tier || 1,
-      });
-    }
-
-    if (latest?.type === 'CHOOSE_WITNESS') {
-      fx.emit?.(FX.NOBLE_CEREMONY, {
-        at: { cx: w * 0.5, cy: h * 0.3 },
-        text: '증언 확보',
-      });
-    }
-  }, [fx, roomData?.log, userId]);
+    const isMe = actorId && userId && actorId === userId;
+    return isMe ? { cx: w * 0.5, cy: h * 0.86 } : { cx: w * 0.5, cy: h * 0.18 };
+  };
 
   useEffect(() => {
-    if (!fx || !roomData?.status) return;
-    if (lastStatusRef.current === roomData.status) return;
+    if (!fx) return;
+    if (!roomData || !Array.isArray(roomData.log)) return;
+    if (typeof window === 'undefined') return;
 
-    if (roomData.status === 'final_round') {
-      fx.emit?.(FX.TURN_WAVE, {
-        text: '마지막 라운드',
-        at: { cx: (typeof window !== 'undefined' ? window.innerWidth : 360) * 0.5, cy: 82 },
-      });
+    const logs = roomData.log;
+    const latestSeq = Number(logs[logs.length - 1]?.seq || 0);
+    if (lastSeenLogSeqRef.current == null) {
+      lastSeenLogSeqRef.current = latestSeq;
+      return;
     }
 
-    if (roomData.status === 'ended') {
-      const winnerName = players.find((player) => player.id === roomData.winnerId)?.name || '수사관';
-      fx.emit?.(FX.VICTORY_BURST, { winnerName });
-    }
+    const lastSeenSeq = Number(lastSeenLogSeqRef.current || 0);
+    let newItems = [];
 
-    lastStatusRef.current = roomData.status;
-  }, [fx, players, roomData?.status, roomData?.winnerId]);
+    newItems = logs.filter((entry) => Number(entry?.seq || 0) > lastSeenSeq);
+    if (!newItems.length) {
+      if (latestSeq > lastSeenSeq) lastSeenLogSeqRef.current = latestSeq;
+      return;
+    }
+    lastSeenLogSeqRef.current = Number(newItems[newItems.length - 1]?.seq || latestSeq);
+
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    const bankRect = fx.getAnchorRect?.('bank:center') || fallbackRect(w * 0.18, h * 0.8);
+    const deckFallback = fallbackRect(w * 0.84, h * 0.22);
+
+    for (const e of newItems) {
+      const type = e?.type;
+      const actorId = e?.actorId;
+      if (!type || !actorId) continue;
+
+      const toHud = fx.getAnchorRect?.(`hud:${actorId}`) || destRectForActor(actorId);
+      const scoreRect = fx.getAnchorRect?.(`hudScore:${actorId}`) || toHud;
+      const reserveStripRect = fx.getAnchorRect?.(`reserved-strip:${actorId}`) || toHud;
+
+      if (type === 'END_TURN') {
+        const nextId = roomData?.turnOrder?.[e.nextTurnIndex];
+        const nextName = players?.find((player) => player.id === nextId)?.name || '다음 플레이어';
+        fx.emit?.(FX.TURN_WAVE, {
+          text: e.status === 'final_round' ? '마지막 라운드 시작' : nextId === userId ? '내 차례' : `${nextName} 차례`,
+          at: { cx: w * 0.5, cy: 72 },
+        });
+
+        if (e.autoNoble?.nobleId) {
+          fx.emit?.(FX.NOBLE_CEREMONY, { at: `noble:${e.autoNoble.nobleId}`, text: '귀족 방문' });
+          fx.emit?.(FX.SCORE_POP, { at: scoreRect, text: `+${e.autoNoble.points || 3}`, tone: 'gold' });
+        }
+
+        if (e.status === 'ended' && e.winnerId) {
+          const winnerName = players?.find((p) => p.id === e.winnerId)?.name || String(e.winnerId).slice(0, 6);
+          fx.emit?.(FX.VICTORY_BURST, { winnerName });
+        }
+        continue;
+      }
+
+      if (type === 'TAKE_GEMS') {
+        const colors = Array.isArray(e.selected) ? e.selected : [];
+        if (colors.length) {
+          fx.emitBatch?.(
+            colors.map((color) => ({
+              type: FX.GEM_BURST_TO_PLAYER,
+              payload: {
+                from: fx.getAnchorRect?.(`bank:${color}`) || bankRect,
+                to: toHud,
+                colors: [color],
+              },
+            }))
+          );
+        }
+        continue;
+      }
+
+      if (type === 'RESERVE' || type === 'RESERVE_DECK') {
+        const cardId = e.cardId || null;
+        const fromCard = cardId ? fx.getAnchorRect?.(`card:${cardId}`) : null;
+        const from = fromCard || deckFallback;
+        const reserveDest = actorId === userId ? reserveStripRect : toHud;
+
+        fx.emit?.(FX.CARD_FLY_TO_PLAYER, {
+          from,
+          to: reserveDest,
+          tier: e.tier || 1,
+          label: '',
+        });
+
+        if (e.tookGold) {
+          fx.emit?.(FX.GEM_BURST_TO_PLAYER, {
+            from: fx.getAnchorRect?.('bank:gold') || bankRect,
+            to: reserveDest,
+            colors: ['gold'],
+          });
+        }
+
+        if (e.refill?.tier) {
+          const toSlot = fx.getAnchorRect?.(`card:${e.refill.newCardId}`) || fallbackRect(w * 0.5, h * 0.42);
+          fx.emit?.(FX.CARD_SLIDE_IN, {
+            from: deckFallback,
+            to: toSlot,
+            tier: e.refill.tier,
+            flipAfter: true,
+          });
+        }
+        continue;
+      }
+
+      if (type === 'BUY') {
+        const cardId = e.cardId || null;
+        const fromCard = cardId ? fx.getAnchorRect?.(`card:${cardId}`) : null;
+        const from = fromCard || (e.fromReserved ? reserveStripRect : fallbackRect(w * 0.5, h * 0.46));
+
+        const paymentEntries = getOrderedColorEntries(e.payment || {}, { includeGold: true }).flatMap(([color, count]) =>
+          Array.from({ length: count || 0 }).map(() => color)
+        );
+        if (paymentEntries.length) {
+          fx.emitBatch?.(
+            paymentEntries.map((color) => ({
+              type: FX.GEM_BURST_TO_PLAYER,
+              payload: {
+                from: toHud,
+                to: fx.getAnchorRect?.(`bank:${color}`) || bankRect,
+                colors: [color],
+              },
+            }))
+          );
+        }
+
+        fx.emit?.(FX.CARD_FLY_TO_PLAYER, {
+          from,
+          to: toHud,
+          tier: e.tier || 1,
+          label: '',
+        });
+
+        const pts = typeof e.points === 'number' ? e.points : 0;
+        fx.emit?.(FX.SCORE_POP, { at: scoreRect, text: pts > 0 ? `+${pts}` : '+', tone: 'gold' });
+
+        if (e.refill?.tier) {
+          const toSlot = fx.getAnchorRect?.(`card:${e.refill.newCardId}`) || fallbackRect(w * 0.5, h * 0.42);
+          fx.emit?.(FX.CARD_SLIDE_IN, {
+            from: deckFallback,
+            to: toSlot,
+            tier: e.refill.tier,
+            flipAfter: true,
+          });
+        }
+        continue;
+      }
+
+      if (type === 'CHOOSE_NOBLE') {
+        fx.emit?.(FX.NOBLE_CEREMONY, { at: `noble:${e.nobleId}`, text: '귀족 방문' });
+        const pts = typeof e.noblePoints === 'number' ? e.noblePoints : 3;
+        fx.emit?.(FX.SCORE_POP, { at: scoreRect, text: `+${pts}`, tone: 'gold' });
+        continue;
+      }
+
+      if (type === 'DISCARD') {
+        if (e.gem) {
+          fx.emit?.(FX.GEM_BURST_TO_PLAYER, {
+            from: toHud,
+            to: fx.getAnchorRect?.(`bank:${e.gem}`) || bankRect,
+            colors: [e.gem],
+          });
+        }
+      }
+    }
+  }, [roomCode, roomData?.log, roomData?.status, roomData?.turnIndex, roomData?.turnOrder?.join('|'), playerMetaKey, userId, fx]);
 }
+

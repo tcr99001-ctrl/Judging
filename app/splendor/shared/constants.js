@@ -2,7 +2,7 @@ export const COLORS = ['white', 'blue', 'green', 'red', 'black'];
 export const ALL = [...COLORS, 'gold'];
 
 export const CASE_TITLE = '가면 경매장의 마지막 증언';
-export const CASE_TAGLINE = '왕관은 사라졌고, 누군가는 거짓말을 하고 있다.';
+export const CASE_TAGLINE = '경매는 멈췄다. 왕관은 사라졌다.';
 
 export const GEM_STYLE = {
   white: 'bg-slate-50 border-slate-300 text-slate-900',
@@ -36,12 +36,12 @@ export const RESOURCE_SHORT = {
 export const GEM_SHORT = RESOURCE_SHORT;
 
 export const RESOURCE_DESC = {
-  white: '증언, 출입 시간, 눈에 띄는 부재를 다룬다.',
-  blue: '명부, 계약서, 보관 기록을 훑는다.',
-  green: '현장 흔적과 손상, 미세한 오차를 건진다.',
-  red: '감정, 갈등, 원한의 결을 쫓는다.',
-  black: '은닉, 위조, 뒤처리의 자국을 파고든다.',
-  gold: '영장, 특권, 비공식 협조를 뜻하는 와일드 자원이다.',
+  white: '알리바이를 뒤진다.',
+  blue: '기록을 뒤진다.',
+  green: '현장을 뒤진다.',
+  red: '동기를 뒤진다.',
+  black: '은폐를 뒤진다.',
+  gold: '특권 자원이다.',
 };
 
 export const GEM_SYMBOL = {
@@ -109,7 +109,7 @@ export const MAX_RESERVED = 3;
 export const ROOM_MAX_PLAYERS = 4;
 export const LOG_LIMIT = 40;
 
-export const BOT_NAME = '수사 자동기록관';
+export const BOT_NAME = '기록관';
 export const BOT_LOOP_MS = 950;
 export const BOT_THINK_DELAY_MS = 420;
 

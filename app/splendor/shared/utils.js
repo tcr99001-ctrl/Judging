@@ -203,6 +203,7 @@ export function buildNotebookSnapshot(notebook = {}) {
     remainingSuspects: getRemainingSuspectIds(notebook),
     remainingMotives: getRemainingMotiveIds(notebook),
     remainingMethods: getRemainingMethodIds(notebook),
+    notes: [...(notebook?.notes || [])],
   };
 }
 

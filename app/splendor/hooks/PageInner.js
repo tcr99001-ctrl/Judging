@@ -18,7 +18,6 @@ import { txMove } from '../engine/txMove';
 import { useFX } from '../fx/FXProvider';
 import { useAuthAnon } from './useAuthAnon';
 import { useInviteRoomParam } from './useInviteRoomParam';
-import { useRoomLogFX } from './useRoomLogFX';
 import { useRoomSync } from './useRoomSync';
 import { useSplendorActions } from './useSplendorActions';
 import AccuseModal from '../modals/AccuseModal';
@@ -26,7 +25,7 @@ import DiscardModal from '../modals/DiscardModal';
 import GemModal from '../modals/GemModal';
 import NobleModal from '../modals/NobleModal';
 import OpponentModal from '../modals/OpponentModal';
-import { CASE_TAGLINE, STALE_PLAYER_MS } from '../shared/constants';
+import { STALE_PLAYER_MS } from '../shared/constants';
 import { getDisplayName, isPlayerStaleFromPresence, toMillis } from '../shared/utils';
 
 export default function PageInner() {
@@ -55,7 +54,7 @@ export default function PageInner() {
     const timer = window.setTimeout(() => {
       setToasts((current) => current.filter((item) => item.id !== id));
       toastTimersRef.current.delete(id);
-    }, 1700);
+    }, 1500);
     toastTimersRef.current.set(id, timer);
   }, []);
 
@@ -113,6 +112,7 @@ export default function PageInner() {
       setShowAccuse(false);
       return;
     }
+
     if (roomData.status === 'lobby') {
       setActiveCard(null);
       setShowLeadModal(false);
@@ -154,8 +154,6 @@ export default function PageInner() {
     txMove,
   });
 
-  useRoomLogFX({ roomCode, roomData, players, userId: user?.uid, fx });
-
   const actions = useSplendorActions({
     db,
     roomCode,
@@ -171,7 +169,7 @@ export default function PageInner() {
       await job();
       if (successText) pushToast(successText, 'success');
     } catch (error) {
-      pushToast(error?.message || '행동을 처리하지 못했다.', 'error');
+      pushToast(error?.message || '처리 실패', 'error');
     }
   }, [pushToast]);
 
@@ -182,56 +180,56 @@ export default function PageInner() {
       await navigator.clipboard.writeText(`${base}?room=${roomCode}`);
       setCopyStatus('copied');
       if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
-      copyTimerRef.current = window.setTimeout(() => setCopyStatus(null), 1300);
-      pushToast('초대 링크를 복사했다.', 'success');
+      copyTimerRef.current = window.setTimeout(() => setCopyStatus(null), 1200);
+      pushToast('링크 복사 완료', 'success');
     } catch {
       setCopyStatus('error');
       if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
-      copyTimerRef.current = window.setTimeout(() => setCopyStatus(null), 1300);
-      pushToast('초대 링크 복사가 미끄러졌다.', 'error');
+      copyTimerRef.current = window.setTimeout(() => setCopyStatus(null), 1200);
+      pushToast('복사 실패', 'error');
     }
   }, [pushToast, roomCode]);
 
   const handleConfirmLeads = useCallback(async (selected) => {
-    await withMove(() => actions.confirmCollectLeads(selected), '조사 자원을 챙겼다.');
+    await withMove(() => actions.confirmCollectLeads(selected), '자원 확보');
     setSelectedLeads([]);
     setShowLeadModal(false);
   }, [actions, withMove]);
 
   const handleSecureCard = useCallback(async (card, fromReserved = false) => {
-    await withMove(() => actions.onSecureClue(card, fromReserved), '단서를 확보했다.');
+    await withMove(() => actions.onSecureClue(card, fromReserved), '단서 확보');
     setActiveCard(null);
   }, [actions, withMove]);
 
   const handlePinCard = useCallback(async (card) => {
-    await withMove(() => actions.onPinLead(card), '리드를 비공개로 고정했다.');
+    await withMove(() => actions.onPinLead(card), '리드 고정');
     setActiveCard(null);
   }, [actions, withMove]);
 
   const handlePinTopLead = useCallback(async (tier) => {
-    await withMove(() => actions.onPinTopLead(tier), '덱 맨 위 리드를 가려 뒀다.');
+    await withMove(() => actions.onPinTopLead(tier), '상단 리드 고정');
   }, [actions, withMove]);
 
   const handleDiscard = useCallback(async (color) => {
-    await withMove(() => actions.onDiscardExcess(color), `${color === 'gold' ? '특권' : ''} 자원 하나를 정리했다.`);
+    await withMove(() => actions.onDiscardExcess(color), '자원 정리');
   }, [actions, withMove]);
 
   const handleChooseWitness = useCallback(async (witnessId) => {
-    await withMove(() => actions.onChooseWitness(witnessId), '증언 하나를 붙잡았다.');
+    await withMove(() => actions.onChooseWitness(witnessId), '추궁 완료');
   }, [actions, withMove]);
 
   const handleAccuse = useCallback(async ({ culpritId, motiveId, methodId }) => {
-    await withMove(() => actions.onAccuse({ culpritId, motiveId, methodId }), '최종 고발을 던졌다.');
+    await withMove(() => actions.onAccuse({ culpritId, motiveId, methodId }), '고발 실행');
     setShowAccuse(false);
   }, [actions, withMove]);
 
   const handleEndTurn = useCallback(async () => {
-    await withMove(() => actions.onEndTurn(), '턴을 정리했다.');
+    await withMove(() => actions.onEndTurn(), '턴 종료');
   }, [actions, withMove]);
 
   const handleForceStaleSkip = useCallback(async () => {
     if (!currentId) return;
-    await withMove(() => actions.onForceStaleSkip(currentId), '오래 비운 차례를 정리했다.');
+    await withMove(() => actions.onForceStaleSkip(currentId), '강제 정리');
   }, [actions, currentId, withMove]);
 
   const pendingWitnesses = useMemo(() => {
@@ -244,8 +242,8 @@ export default function PageInner() {
 
   if (!ready) {
     return (
-      <div className="app-shell game-surface flex items-center justify-center px-4">
-        <div className="panel px-5 py-5 text-center text-sm font-black text-slate-200">사건 파일을 불러오는 중이다.</div>
+      <div className="app-shell game-surface flex min-h-screen items-center justify-center px-4">
+        <div className="panel px-5 py-5 text-center text-sm font-black text-slate-200">사건 파일을 여는 중</div>
       </div>
     );
   }
@@ -286,7 +284,7 @@ export default function PageInner() {
   }
 
   return (
-    <div className="app-shell game-surface safe-bottom">
+    <div className="app-shell game-surface">
       <GameHeader
         roomCode={roomCode}
         roomData={roomData}
@@ -302,20 +300,10 @@ export default function PageInner() {
         staleTargetName={currentPlayer ? getDisplayName(currentPlayer) : ''}
       />
 
-      <main className="mx-auto flex h-full w-full max-w-[460px] flex-col overflow-y-auto px-3 pb-[440px] pt-3">
-        <div className="rounded-3xl border border-white/10 bg-slate-900/36 px-4 py-4 text-sm font-bold leading-6 text-slate-200">
-          {CASE_TAGLINE}
-        </div>
+      <main className="mx-auto min-h-[calc(100dvh-72px)] w-full max-w-[480px] px-3 pb-[300px] pt-3">
+        <div className="space-y-3">
+          {guideOpen ? <BeginnerGuide mode="inline" /> : null}
 
-        <div className="mt-3">
-          <NobleStrip
-            witnessStrip={roomData?.witnessStrip || roomData?.nobles || []}
-            myInsights={myData?.insights || myData?.bonuses || {}}
-            pendingOptions={pending?.type === 'witness' ? pending.options || [] : []}
-          />
-        </div>
-
-        <div className="mt-3">
           <MarketGrid
             board={roomData?.board || { 1: [], 2: [], 3: [] }}
             decks={roomData?.decks || { 1: [], 2: [], 3: [] }}
@@ -325,9 +313,13 @@ export default function PageInner() {
             onOpenCard={setActiveCard}
             onPinTopLead={handlePinTopLead}
           />
-        </div>
 
-        <div className="mt-3">
+          <NobleStrip
+            witnessStrip={roomData?.witnessStrip || roomData?.nobles || []}
+            myInsights={myData?.insights || myData?.bonuses || {}}
+            pendingOptions={pending?.type === 'witness' ? pending.options || [] : []}
+          />
+
           <ReservedStrip
             reserved={myData?.reservedLeads || myData?.reserved || []}
             reservedCount={myData?.reservedCount || (myData?.reservedLeads || myData?.reserved || []).length || 0}
@@ -350,8 +342,6 @@ export default function PageInner() {
         onOpenAccuse={() => setShowAccuse(true)}
         onEndTurn={handleEndTurn}
       />
-
-      <BeginnerGuide open={guideOpen} onClose={() => setGuideOpen(false)} />
 
       <CardModal
         open={!!activeCard}
