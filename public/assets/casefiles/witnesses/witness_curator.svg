@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 176 220" fill="none">
+  <rect x="12" y="18" width="152" height="186" rx="22" fill="#DCCCAD" stroke="#241C17" stroke-width="4"/>
+  <path d="M34 18H86L98 30H34C27.3726 30 22 35.3726 22 42V52H12V40C12 27.8497 21.8497 18 34 18Z" fill="#2A3540"/>
+  <rect x="30" y="48" width="116" height="16" rx="8" fill="#2A3540"/>
+  <path d="M88 84C88 72.9543 96.9543 64 108 64C119.046 64 128 72.9543 128 84V90H88V84Z" fill="#2A3540"/>
+  <path d="M48 88C48 67.0132 65.0132 50 86 50C106.987 50 124 67.0132 124 88V124H48V88Z" fill="#A27C53" stroke="#241C17" stroke-width="4"/>
+  <circle cx="86" cy="86" r="20" fill="#DCCCAD" stroke="#241C17" stroke-width="4"/>
+  <path d="M52 126C56.6667 111.333 68 104 86 104C104 104 115.333 111.333 120 126" stroke="#241C17" stroke-width="4" stroke-linecap="round"/>
+  <rect x="52" y="136" width="72" height="34" rx="8" fill="#E9DFC8" stroke="#241C17" stroke-width="4"/>
+  <path d="M62 148H114" stroke="#241C17" stroke-width="4" stroke-linecap="round"/>
+  <path d="M62 160H104" stroke="#7E3C2F" stroke-width="4" stroke-linecap="round"/>
+  <path d="M42 182H134" stroke="#241C17" stroke-width="4" stroke-linecap="round" opacity=".55"/>
+</svg>

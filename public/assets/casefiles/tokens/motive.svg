@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+  <defs>
+    <linearGradient id="paper" x1="12" y1="12" x2="112" y2="114" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E7DAB9"/>
+      <stop offset="1" stop-color="#C9AB80"/>
+    </linearGradient>
+  </defs>
+  <path d="M18 24H88L106 42V104L94 114H18L10 106V34L18 24Z" fill="url(#paper)" stroke="#251D18" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M88 24V42H106" stroke="#251D18" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M49 54C49 48.4772 53.4772 44 59 44C62.0523 44 64.7854 45.3654 66.6193 47.5216C68.4532 45.3654 71.1863 44 74.2386 44C79.7614 44 84.2386 48.4772 84.2386 54C84.2386 67.5 66.6193 81 66.6193 81C66.6193 81 49 67.5 49 54Z" fill="#7E3C2F" stroke="#251D18" stroke-width="4" stroke-linejoin="round"/>
+  <path d="M72 44L60 84" stroke="#EBDCB7" stroke-width="4" stroke-linecap="round"/>
+  <path d="M34 95C46 88 56 88 68 95" stroke="#203142" stroke-width="4" stroke-linecap="round"/>
+  <path d="M74 95C82 90 88 90 94 95" stroke="#203142" stroke-width="4" stroke-linecap="round" opacity=".75"/>
+</svg>

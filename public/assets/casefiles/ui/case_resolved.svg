@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" fill="none">
+  <g transform="rotate(-12 120 120)">
+    <rect x="38" y="70" width="164" height="92" rx="18" fill="#7E3C2F" fill-opacity=".08" stroke="#7E3C2F" stroke-width="8" stroke-dasharray="10 6"/>
+    <text x="120" y="115" text-anchor="middle" fill="#7E3C2F" font-family="Pretendard, Inter, sans-serif" font-size="44" font-weight="900">사건</text>
+    <text x="120" y="152" text-anchor="middle" fill="#7E3C2F" font-family="Pretendard, Inter, sans-serif" font-size="44" font-weight="900">종결</text>
+  </g>
+  <circle cx="120" cy="120" r="106" stroke="#7E3C2F" stroke-width="4" stroke-dasharray="5 9" opacity=".6"/>
+</svg>

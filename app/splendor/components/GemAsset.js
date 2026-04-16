@@ -13,7 +13,7 @@ export default function GemAsset({
   return (
     <AssetImage
       src={GEM_ASSET[color]}
-      alt={alt || `${GEM_LABEL[color] || color} 토큰`}
+      alt={alt || `${GEM_LABEL[color] || color} 표식`}
       decorative={decorative}
       eager={eager}
       className={className}
