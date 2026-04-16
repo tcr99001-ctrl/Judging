@@ -1,28 +1,22 @@
 'use client';
 
 import React from 'react';
-import { Archive, Search, X } from 'lucide-react';
+import { FilePlus2, PinOff, Search, X } from 'lucide-react';
 import CardFace from './CardFace';
-import { getClueAcquireDisplay, summarizeNotebookEffect } from '../shared/utils';
 
 export default function CardModal({
   open,
   card,
-  myData,
-  isMyTurn,
-  lockUsed,
-  pendingForMe,
+  source,
+  canTake,
+  canToggleLead,
+  onTake,
+  onToggleLead,
   onClose,
-  onSecure,
-  onPin,
 }) {
   if (!open || !card) return null;
 
-  const fromReserved = card.sourceType === 'reserved';
-  const canSecure = isMyTurn && !lockUsed && !pendingForMe;
-  const canPin = isMyTurn && !lockUsed && !pendingForMe && !fromReserved;
-  const acquire = getClueAcquireDisplay(card, myData || {});
-  const effectLines = card.effectLines?.length ? card.effectLines : summarizeNotebookEffect(card.effect);
+  const actionLabel = source === 'reserved' ? '리드 해제' : '리드 고정';
 
   return (
     <div className="modal-layer">
@@ -33,67 +27,78 @@ export default function CardModal({
             <div className="text-[11px] font-black tracking-[0.18em] text-slate-400">단서</div>
             <div className="mt-1 text-lg font-black text-white">{card.title}</div>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="tap-feedback rounded-2xl border border-white/10 bg-slate-900/55 p-2 text-slate-200"
-            aria-label="닫기"
-          >
+          <button type="button" onClick={onClose} className="tap-feedback rounded-2xl border border-white/10 bg-slate-900/55 p-2 text-slate-200">
             <X size={16} />
           </button>
         </div>
 
         <div className="grid gap-4 px-4 py-4">
-          <div className="mx-auto w-[220px] max-w-full">
-            <CardFace card={card} compact sourceLabel={fromReserved ? '비공개 리드' : '공개 보드'} />
+          <div className="mx-auto w-full max-w-[320px]">
+            <CardFace card={card} />
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-2xl border border-white/10 bg-slate-900/46 px-4 py-3">
-              <div className="text-[11px] font-black tracking-[0.16em] text-slate-400">확보 상태</div>
-              <div className="mt-2 text-sm font-bold text-white">{acquire.canAfford ? '지금 확보 가능' : '자원 부족'}</div>
-              {!acquire.canAfford ? <div className="mt-1 text-sm font-bold text-rose-200">부족: {acquire.missingText}</div> : null}
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-slate-900/46 px-4 py-3">
-              <div className="text-[11px] font-black tracking-[0.16em] text-slate-400">얻는 정보</div>
-              <div className="mt-2 text-sm font-bold text-white">{effectLines?.[0] || '새로운 정리 없음'}</div>
-            </div>
+          <div className="rounded-3xl border border-white/10 bg-slate-950/44 px-4 py-4 text-sm font-bold leading-6 text-slate-200">
+            {card.detail}
           </div>
 
-          {card.detail ? (
-            <div className="rounded-2xl border border-white/10 bg-slate-900/46 px-4 py-4 text-sm font-bold leading-6 text-slate-200">
-              {card.detail}
+          {card.quote ? (
+            <div className="rounded-3xl border border-white/10 bg-slate-950/44 px-4 py-4 text-sm font-bold italic leading-6 text-slate-300">
+              {card.quote}
             </div>
           ) : null}
 
-          {effectLines?.length > 1 ? (
-            <div className="rounded-2xl border border-white/10 bg-slate-900/46 px-4 py-4 text-sm font-bold leading-6 text-slate-200">
-              {effectLines.slice(1).map((line) => <div key={line}>{line}</div>)}
+          {(card.threads || []).length ? (
+            <div className="rounded-3xl border border-white/10 bg-slate-950/44 px-4 py-4">
+              <div className="text-[11px] font-black tracking-[0.16em] text-slate-400">실마리</div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {card.threads.map((thread) => (
+                  <span key={thread} className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-sm font-black text-white">
+                    {thread}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {card.directiveLines?.length ? (
+            <div className="rounded-3xl border border-white/10 bg-slate-950/44 px-4 py-4">
+              <div className="text-[11px] font-black tracking-[0.16em] text-slate-400">대조 결과</div>
+              <div className="mt-3 grid gap-2 text-sm font-bold text-slate-200">
+                {card.directiveLines.map((line) => (
+                  <div key={line} className="rounded-2xl border border-white/8 bg-white/5 px-3 py-2">
+                    {line}
+                  </div>
+                ))}
+              </div>
             </div>
           ) : null}
         </div>
 
-        <div className="grid grid-cols-1 gap-2 border-t border-white/10 px-4 py-4 sm:grid-cols-3">
-          <button
-            type="button"
-            onClick={() => canPin && onPin?.(card)}
-            disabled={!canPin}
-            className="tap-feedback min-h-12 rounded-2xl border border-white/10 bg-slate-900/55 px-4 py-3 text-sm font-black text-slate-100 disabled:border-slate-800 disabled:bg-slate-950 disabled:text-slate-500"
-          >
-            <span className="inline-flex items-center gap-2"><Archive size={15} /> 리드</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => canSecure && onSecure?.(card, fromReserved)}
-            disabled={!canSecure || !acquire.canAfford}
-            className="tap-feedback min-h-12 rounded-2xl border border-amber-300/25 bg-amber-500/12 px-4 py-3 text-sm font-black text-amber-50 disabled:border-slate-800 disabled:bg-slate-950 disabled:text-slate-500"
-          >
-            <span className="inline-flex items-center gap-2"><Search size={15} /> 확보</span>
-          </button>
+        <div className="grid gap-2 border-t border-white/10 px-4 py-4 sm:grid-cols-2">
+          {source === 'board' ? (
+            <button
+              type="button"
+              onClick={() => canTake && onTake?.(card.id)}
+              disabled={!canTake}
+              className="tap-feedback min-h-12 rounded-2xl border border-emerald-300/25 bg-emerald-500/12 px-4 py-3 text-sm font-black text-emerald-50 disabled:border-slate-800 disabled:bg-slate-950 disabled:text-slate-500"
+            >
+              <span className="inline-flex items-center gap-2"><Search size={15} /> 확보</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => canToggleLead && onToggleLead?.(card.id)}
+              disabled={!canToggleLead}
+              className="tap-feedback min-h-12 rounded-2xl border border-amber-300/25 bg-amber-500/12 px-4 py-3 text-sm font-black text-amber-50 disabled:border-slate-800 disabled:bg-slate-950 disabled:text-slate-500"
+            >
+              <span className="inline-flex items-center gap-2">{source === 'reserved' ? <PinOff size={15} /> : <FilePlus2 size={15} />}{actionLabel}</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={onClose}
-            className="tap-feedback min-h-12 rounded-2xl border border-white/10 bg-slate-900/55 px-4 py-3 text-sm font-black text-slate-100"
+            className="tap-feedback min-h-12 rounded-2xl border border-white/10 bg-slate-950/54 px-4 py-3 text-sm font-black text-slate-100"
           >
             닫기
           </button>

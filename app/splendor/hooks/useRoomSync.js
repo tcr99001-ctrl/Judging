@@ -1,11 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { collection, doc, onSnapshot } from 'firebase/firestore';
-import {
-  hasRealCardPayload,
-  makeDeckPlaceholders,
-  normalizeBonuses,
-  normalizeResources,
-} from '../shared/utils';
+import { countLineProfile, makeDeckPlaceholders } from '../shared/utils';
 
 function sanitizeRoomData(raw) {
   if (!raw) return null;
@@ -16,39 +11,47 @@ function sanitizeRoomData(raw) {
       2: makeDeckPlaceholders(Array.isArray(raw?.decks?.[2]) ? raw.decks[2].length : raw?.decks?.[2]),
       3: makeDeckPlaceholders(Array.isArray(raw?.decks?.[3]) ? raw.decks[3].length : raw?.decks?.[3]),
     },
+    witnessStrip: Array.isArray(raw?.witnessStrip) ? raw.witnessStrip : (Array.isArray(raw?.nobles) ? raw.nobles : []),
+    nobles: Array.isArray(raw?.witnessStrip) ? raw.witnessStrip : (Array.isArray(raw?.nobles) ? raw.nobles : []),
   };
 }
 
 function sanitizePlayer(id, data = {}) {
-  const clues = Array.isArray(data?.clues) ? data.clues : (Array.isArray(data?.cards) ? data.cards : []);
   return {
     id,
     ...data,
-    resources: normalizeResources(data?.resources || data?.gems),
-    gems: normalizeResources(data?.resources || data?.gems),
-    clues,
-    cards: clues,
-    insights: normalizeBonuses(data?.insights || data?.bonuses, clues),
-    bonuses: normalizeBonuses(data?.insights || data?.bonuses, clues),
-    reservedCount: Number.isFinite(data?.reservedCount)
-      ? data.reservedCount
-      : Array.isArray(data?.reserved) ? data.reserved.length : 0,
-    reserved: hasRealCardPayload(data?.reserved) ? data.reserved : [],
+    clueCount: Number(data?.clueCount || 0),
+    reservedCount: Number(data?.reservedCount || 0),
+    witnessCount: Number(data?.witnessCount || 0),
+    caseProgress: Number(data?.caseProgress || 0),
+    breakthroughs: Number(data?.breakthroughs || 0),
+    turnsTaken: Number(data?.turnsTaken || 0),
+    accusationLocked: !!data?.accusationLocked,
+    privateClues: [],
     reservedLeads: [],
-    witnesses: Array.isArray(data?.witnesses) ? data.witnesses : (Array.isArray(data?.nobles) ? data.nobles : []),
-    nobles: Array.isArray(data?.witnesses) ? data.witnesses : (Array.isArray(data?.nobles) ? data.nobles : []),
+    notebook: { eliminatedSuspects: [], eliminatedMotives: [], eliminatedMethods: [], notes: [] },
+    accusationHistory: [],
+    crosscheckPairs: [],
+    interrogatedWitnessIds: [],
+    lineProfile: countLineProfile([]),
+  };
+}
+
+function emptyPrivate() {
+  return {
+    privateClues: [],
+    reservedLeads: [],
+    notebook: { eliminatedSuspects: [], eliminatedMotives: [], eliminatedMethods: [], notes: [] },
+    accusationHistory: [],
+    crosscheckPairs: [],
+    interrogatedWitnessIds: [],
   };
 }
 
 export function useRoomSync({ db, roomCode, userId }) {
   const [roomData, setRoomData] = useState(null);
   const [publicPlayers, setPublicPlayers] = useState([]);
-  const [myPrivate, setMyPrivate] = useState({
-    reservedLeads: [],
-    reserved: [],
-    notebook: { eliminatedSuspects: [], eliminatedMotives: [], eliminatedMethods: [], notes: [] },
-    accusationHistory: [],
-  });
+  const [myPrivate, setMyPrivate] = useState(emptyPrivate());
 
   useEffect(() => {
     if (!db || !roomCode || roomCode.length !== 4) {
@@ -68,9 +71,7 @@ export function useRoomSync({ db, roomCode, userId }) {
 
     const unsubPlayers = onSnapshot(collection(db, 'rooms', roomCode, 'players'), (snapshot) => {
       const next = [];
-      snapshot.forEach((entry) => {
-        next.push(sanitizePlayer(entry.id, entry.data()));
-      });
+      snapshot.forEach((entry) => next.push(sanitizePlayer(entry.id, entry.data())));
       setPublicPlayers(next);
     });
 
@@ -82,59 +83,46 @@ export function useRoomSync({ db, roomCode, userId }) {
 
   useEffect(() => {
     if (!db || !roomCode || roomCode.length !== 4 || !userId) {
-      setMyPrivate({
-        reservedLeads: [],
-        reserved: [],
-        notebook: { eliminatedSuspects: [], eliminatedMotives: [], eliminatedMethods: [], notes: [] },
-        accusationHistory: [],
-      });
+      setMyPrivate(emptyPrivate());
       return undefined;
     }
 
     const ref = doc(db, 'rooms', roomCode, 'playersPrivate', userId);
     return onSnapshot(ref, (snapshot) => {
       if (!snapshot.exists()) {
-        setMyPrivate({
-          reservedLeads: [],
-          reserved: [],
-          notebook: { eliminatedSuspects: [], eliminatedMotives: [], eliminatedMethods: [], notes: [] },
-          accusationHistory: [],
-        });
+        setMyPrivate(emptyPrivate());
         return;
       }
       const data = snapshot.data() || {};
-      const reservedLeads = Array.isArray(data?.reservedLeads)
-        ? data.reservedLeads
-        : Array.isArray(data?.reserved) ? data.reserved : [];
       setMyPrivate({
-        ...data,
-        reservedLeads,
-        reserved: reservedLeads,
+        privateClues: Array.isArray(data?.privateClues) ? data.privateClues : [],
+        reservedLeads: Array.isArray(data?.reservedLeads) ? data.reservedLeads : [],
         notebook: data?.notebook || { eliminatedSuspects: [], eliminatedMotives: [], eliminatedMethods: [], notes: [] },
         accusationHistory: Array.isArray(data?.accusationHistory) ? data.accusationHistory : [],
+        crosscheckPairs: Array.isArray(data?.crosscheckPairs) ? data.crosscheckPairs : [],
+        interrogatedWitnessIds: Array.isArray(data?.interrogatedWitnessIds) ? data.interrogatedWitnessIds : [],
       });
     });
   }, [db, roomCode, userId]);
 
   const players = useMemo(() => {
-    const preferredOrder = Array.isArray(roomData?.turnOrder) && roomData.turnOrder.length
+    const order = Array.isArray(roomData?.turnOrder) && roomData.turnOrder.length
       ? roomData.turnOrder
       : Array.isArray(roomData?.lobbyPlayerIds) ? roomData.lobbyPlayerIds : [];
-    const indexMap = new Map(preferredOrder.map((id, index) => [id, index]));
+    const indexMap = new Map(order.map((id, index) => [id, index]));
 
     const merged = publicPlayers.map((player) => {
       if (player.id !== userId) return player;
       return {
         ...player,
-        reservedLeads: myPrivate.reservedLeads,
-        reserved: myPrivate.reservedLeads,
-        notebook: myPrivate.notebook,
-        accusationHistory: myPrivate.accusationHistory,
+        ...myPrivate,
         reservedCount: myPrivate.reservedLeads.length,
+        clueCount: myPrivate.privateClues.length,
+        lineProfile: countLineProfile(myPrivate.privateClues),
       };
     });
 
-    if (!preferredOrder.length) return merged;
+    if (!order.length) return merged;
     return [...merged].sort((a, b) => (indexMap.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (indexMap.get(b.id) ?? Number.MAX_SAFE_INTEGER));
   }, [myPrivate, publicPlayers, roomData?.lobbyPlayerIds, roomData?.turnOrder, userId]);
 

@@ -6,10 +6,10 @@ const WITNESS_BLUEPRINTS = [
     assetId: 'noble_wbk_333',
     title: '가면 후원자',
     role: '익명 후원자',
-    quote: '난 돈 냄새는 맡아도 피 냄새는 싫어.',
-    req: { white: 1, blue: 1, green: 0, red: 0, black: 1 },
-    progress: 2,
+    quote: '왕관 값은 알아도 피값은 몰라.',
+    needs: { threads: ['buyer', 'payment'], crosschecks: 1 },
     plan: { suspect: 1, motive: 1 },
+    risk: '돈 냄새만 맡는 척한다. 근거 없이는 입을 닫는다.',
   },
   {
     id: 'witness_stage_tailor',
@@ -17,9 +17,9 @@ const WITNESS_BLUEPRINTS = [
     title: '무대 재단사',
     role: '의상 관리인',
     quote: '가면 끈이 바뀐 건 내가 먼저 봤지.',
-    req: { white: 0, blue: 1, green: 1, red: 1, black: 0 },
-    progress: 2,
+    needs: { threads: ['mask', 'stage'], crosschecks: 1 },
     plan: { suspect: 1, method: 1 },
+    risk: '허술하게 물으면 의상 탓만 하고 빠진다.',
   },
   {
     id: 'witness_night_medic',
@@ -27,59 +27,49 @@ const WITNESS_BLUEPRINTS = [
     title: '야간 의무원',
     role: '응급 담당',
     quote: '상처보다 시간차가 더 이상했어.',
-    req: { white: 1, blue: 0, green: 0, red: 1, black: 1 },
-    progress: 2,
+    needs: { threads: ['nurse', 'tea'], crosschecks: 1 },
     plan: { method: 2 },
+    risk: '의료 기록을 안 들이밀면 말문을 아낀다.',
   },
   {
     id: 'witness_archive_keeper',
     assetId: 'noble_gr_44',
     title: '비밀 보관인',
-    role: '기록 서고 책임자',
+    role: '서고 책임자',
     quote: '찢긴 문서는 없어. 숨긴 문서만 있지.',
-    req: { white: 0, blue: 0, green: 2, red: 2, black: 0 },
-    progress: 2,
-    plan: { motive: 2 },
+    needs: { threads: ['ledger', 'code'], crosschecks: 2 },
+    plan: { motive: 1, suspect: 1 },
+    risk: '반쪽 자료로는 웃고 넘긴다.',
   },
   {
     id: 'witness_light_operator',
     assetId: 'noble_bg_44',
     title: '조명 기사',
     role: '무대 장치 조작자',
-    quote: '그 순간 꺼진 조명은 우연이 아니야.',
-    req: { white: 0, blue: 2, green: 2, red: 0, black: 0 },
-    progress: 2,
+    quote: '꺼진 조명은 우연이 아니야.',
+    needs: { threads: ['wire', 'curtain'], crosschecks: 1 },
     plan: { method: 1, suspect: 1 },
+    risk: '장치표 없이 가면 거짓말만 늘어난다.',
   },
   {
     id: 'witness_private_collector',
     assetId: 'noble_rk_44',
     title: '비밀 수집가',
     role: '경매 VIP',
-    quote: '진품이 사라진 밤이면, 누군가는 미리 가격을 안다는 뜻이지.',
-    req: { white: 0, blue: 0, green: 0, red: 2, black: 2 },
-    progress: 2,
+    quote: '진품이 사라진 밤이면 누군가는 미리 안다는 뜻이지.',
+    needs: { threads: ['forgery', 'vault'], crosschecks: 1 },
     plan: { motive: 1, suspect: 1 },
+    risk: '진품선이 안 잡히면 빈정만 건드린다.',
   },
   {
     id: 'witness_door_keeper',
     assetId: 'noble_wk_44',
     title: '뒷문 담당자',
     role: '출입 통제원',
-    quote: '들어간 사람보다 나온 사람이 더 적었어.',
-    req: { white: 2, blue: 0, green: 0, red: 0, black: 2 },
-    progress: 2,
+    quote: '들어간 사람보다 나온 사람이 적었어.',
+    needs: { threads: ['entry', 'passage'], crosschecks: 1 },
     plan: { suspect: 2 },
-  },
-  {
-    id: 'witness_house_musician',
-    assetId: 'noble_wbg_333',
-    title: '상주 연주자',
-    role: '현장 연주 감독',
-    quote: '박자 하나 밀린 순간, 누군가 자리를 비웠어.',
-    req: { white: 1, blue: 1, green: 1, red: 0, black: 0 },
-    progress: 2,
-    plan: { motive: 1, method: 1 },
+    risk: '동선이 없으면 기억도 열리지 않는다.',
   },
   {
     id: 'witness_wine_steward',
@@ -87,35 +77,11 @@ const WITNESS_BLUEPRINTS = [
     title: '와인 스튜어드',
     role: '다과 담당',
     quote: '잔을 바꾼 손은 분명 있었어.',
-    req: { white: 0, blue: 0, green: 1, red: 1, black: 1 },
-    progress: 2,
+    needs: { threads: ['wine', 'tea'], crosschecks: 1 },
     plan: { method: 1, motive: 1 },
-  },
-  {
-    id: 'witness_curtain_master',
-    assetId: 'noble_wb_44',
-    title: '커튼 마스터',
-    role: '무대 전환 책임자',
-    quote: '커튼은 다 숨겨 줘. 대신 순서를 기억하지.',
-    req: { white: 2, blue: 2, green: 0, red: 0, black: 0 },
-    progress: 2,
-    plan: { suspect: 1, method: 1 },
+    risk: '잔 얘기만 하면 끝까지 비웃는다.',
   },
 ];
-
-function describeEffect(effect) {
-  const lines = [];
-  if (effect.eliminateSuspects.length) {
-    lines.push(`용의자 정리: ${effect.eliminateSuspects.map((id) => getCandidateName('suspect', id)).join(', ')} 제외`);
-  }
-  if (effect.eliminateMotives.length) {
-    lines.push(`동기 정리: ${effect.eliminateMotives.map((id) => getCandidateName('motive', id)).join(', ')} 제외`);
-  }
-  if (effect.eliminateMethods.length) {
-    lines.push(`수법 정리: ${effect.eliminateMethods.map((id) => getCandidateName('method', id)).join(', ')} 제외`);
-  }
-  return lines;
-}
 
 function buildFalsePools(solution, random) {
   return {
@@ -133,8 +99,8 @@ function pick(pool, cursor, count, random) {
   const out = [];
   for (let i = 0; i < count; i += 1) {
     if (cursor.index >= pool.length) {
-      const next = seededShuffle(pool, random);
-      pool.splice(0, pool.length, ...next);
+      const reshuffled = seededShuffle(pool, random);
+      pool.splice(0, pool.length, ...reshuffled);
       cursor.index = 0;
     }
     const id = pool[cursor.index];
@@ -142,6 +108,14 @@ function pick(pool, cursor, count, random) {
     if (id && !out.includes(id)) out.push(id);
   }
   return out;
+}
+
+function buildEffectLines(effect) {
+  const lines = [];
+  if (effect.eliminateSuspects.length) lines.push(`용의자 ${effect.eliminateSuspects.map((id) => getCandidateName('suspect', id)).join(', ')} 제외`);
+  if (effect.eliminateMotives.length) lines.push(`동기 ${effect.eliminateMotives.map((id) => getCandidateName('motive', id)).join(', ')} 제외`);
+  if (effect.eliminateMethods.length) lines.push(`수법 ${effect.eliminateMethods.map((id) => getCandidateName('method', id)).join(', ')} 제외`);
+  return lines;
 }
 
 export const NOBLES = WITNESS_BLUEPRINTS;
@@ -165,7 +139,7 @@ export function buildWitnessStrip({ solution, seed }) {
       return {
         ...item,
         effect,
-        effectLines: describeEffect(effect),
+        effectLines: buildEffectLines(effect),
       };
     }),
     random

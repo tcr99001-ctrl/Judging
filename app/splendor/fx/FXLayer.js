@@ -662,7 +662,7 @@ export default function FXLayer() {
     fxParticleBurst(c.x, c.y, { color: COLOR_MAP.gold, count: 12, speed: 220, life: 420 });
 
     fxToast({
-      text: payload.text || '귀족 방문',
+      text: payload.text || '추궁',
       tone: 'gold',
       at: { cx: window.innerWidth * 0.5, cy: window.innerHeight * 0.22 },
       big: true,

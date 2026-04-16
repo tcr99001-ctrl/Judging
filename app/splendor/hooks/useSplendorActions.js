@@ -1,108 +1,64 @@
-'use client';
-
 import { useCallback, useMemo } from 'react';
 import { txMove } from '../engine/txMove';
-import { FX } from '../fx/fxTypes';
-import { canSecureClue } from '../shared/utils';
 
-export function useSplendorActions({
-  db,
-  roomCode,
-  roomData,
-  userId,
-  fx,
-  myData,
-  setActiveCard,
-  setShowLeadModal,
-  setSelectedLeads,
-  selectedLeads,
-}) {
-  const doMove = useCallback(async (type, payload = {}, actorIdOverride = null) => {
-    const actorId = actorIdOverride || userId;
-    if (!db) throw new Error('데이터베이스 연결이 아직 준비되지 않았어.');
-    if (!roomCode) throw new Error('방 코드가 비어 있어.');
-    if (!actorId) throw new Error('수사관 정보가 아직 없어.');
+export function useSplendorActions({ db, roomCode, roomData, userId, myData, fx }) {
+  const doMove = useCallback(async (type, payload = {}, actorId = userId) => {
+    if (!db) throw new Error('DB가 비어 있다.');
+    if (!roomCode || roomCode.length !== 4) throw new Error('방 코드가 필요하다.');
+    if (!actorId) throw new Error('수사관 정보가 없다.');
 
-    await txMove({
+    return txMove({
       db,
       roomCode,
       actorId,
       type,
       payload,
-      requesterId: userId || actorId,
-      requesterSessionId: roomData?.sessionId || null,
+      requesterId: userId,
     });
-  }, [db, roomCode, roomData?.sessionId, userId]);
+  }, [db, roomCode, userId]);
 
-  const onEndTurn = useCallback(async () => {
-    await doMove('END_TURN');
+  const onTakeClue = useCallback(async (cardId) => {
+    if (!cardId) throw new Error('단서가 없다.');
+    await doMove('TAKE_CLUE', { cardId });
+    fx?.emit?.('highlight', { key: `card:${cardId}` });
+  }, [doMove, fx]);
+
+  const onFileLead = useCallback(async (clueId) => {
+    if (!clueId) throw new Error('리드가 없다.');
+    await doMove('FILE_LEAD', { clueId });
   }, [doMove]);
 
-  const confirmCollectLeads = useCallback(async (selectedOverride = null) => {
-    const selected = Array.isArray(selectedOverride) ? selectedOverride : selectedLeads;
-    try {
-      await doMove('COLLECT_LEADS', { selected });
-      if (typeof setShowLeadModal === 'function') setShowLeadModal(false);
-      if (typeof setSelectedLeads === 'function') setSelectedLeads([]);
-    } catch (error) {
-      fx?.emit?.(FX.BUY_FAIL_SHAKE, { at: 'bank:center', text: '선택 재확인' });
-      throw error;
-    }
-  }, [doMove, fx, selectedLeads, setSelectedLeads, setShowLeadModal]);
-
-  const onSecureClue = useCallback(async (cardOrId, fromReserved = false) => {
-    const card = typeof cardOrId === 'string' ? { id: cardOrId } : cardOrId;
-    if (!card?.id) throw new Error('단서 정보가 비어 있어.');
-    fx?.emit?.(FX.CARD_PICK_HIGHLIGHT, { at: `card:${card.id}` });
-    if (card?.cost && !canSecureClue(card, myData)) {
-      fx?.emit?.(FX.BUY_FAIL_SHAKE, { at: `card:${card.id}`, text: '자원 부족' });
-      throw new Error('조사 자원이 아직 모자라.');
-    }
-    await doMove('SECURE_CLUE', { cardId: card.id, fromReserved: !!fromReserved });
-    if (typeof setActiveCard === 'function') setActiveCard(null);
-  }, [doMove, fx, myData, setActiveCard]);
-
-  const onPinLead = useCallback(async (cardOrId) => {
-    const card = typeof cardOrId === 'string' ? { id: cardOrId } : cardOrId;
-    if (!card?.id) throw new Error('고정할 리드가 비어 있어.');
-    fx?.emit?.(FX.CARD_PICK_HIGHLIGHT, { at: `card:${card.id}` });
-    await doMove('PIN_LEAD', { cardId: card.id });
-    if (typeof setActiveCard === 'function') setActiveCard(null);
-  }, [doMove, fx, setActiveCard]);
-
-  const onPinTopLead = useCallback(async (tier) => {
-    await doMove('PIN_TOP_LEAD', { tier });
+  const onCrosscheck = useCallback(async ({ aId, bId }) => {
+    if (!aId || !bId) throw new Error('둘을 골라야 한다.');
+    await doMove('CROSSCHECK', { aId, bId });
   }, [doMove]);
 
-  const onDiscardExcess = useCallback(async (color) => {
-    await doMove('DISCARD_EXCESS', { color });
-  }, [doMove]);
-
-  const onChooseWitness = useCallback(async (witnessId, close) => {
-    if (!witnessId) throw new Error('증언 하나는 골라야 해.');
-    await doMove('CHOOSE_WITNESS', { witnessId });
-    if (typeof close === 'function') close();
+  const onInterrogate = useCallback(async (witnessId) => {
+    if (!witnessId) throw new Error('인물을 골라야 한다.');
+    await doMove('INTERROGATE', { witnessId });
   }, [doMove]);
 
   const onAccuse = useCallback(async ({ culpritId, motiveId, methodId }) => {
     await doMove('ACCUSE', { culpritId, motiveId, methodId });
   }, [doMove]);
 
+  const onEndTurn = useCallback(async () => {
+    await doMove('END_TURN', {});
+  }, [doMove]);
+
   const onForceStaleSkip = useCallback(async (actorId) => {
-    if (!actorId) throw new Error('정리할 차례의 수사관이 비어 있어.');
+    if (!actorId) throw new Error('넘길 차례가 없다.');
     await doMove('FORCE_STALE_SKIP', {}, actorId);
   }, [doMove]);
 
   return useMemo(() => ({
     doMove,
-    onEndTurn,
-    confirmCollectLeads,
-    onSecureClue,
-    onPinLead,
-    onPinTopLead,
-    onDiscardExcess,
-    onChooseWitness,
+    onTakeClue,
+    onFileLead,
+    onCrosscheck,
+    onInterrogate,
     onAccuse,
+    onEndTurn,
     onForceStaleSkip,
-  }), [confirmCollectLeads, doMove, onAccuse, onChooseWitness, onDiscardExcess, onEndTurn, onForceStaleSkip, onPinLead, onPinTopLead, onSecureClue]);
+  }), [doMove, onAccuse, onCrosscheck, onEndTurn, onFileLead, onForceStaleSkip, onInterrogate, onTakeClue]);
 }

@@ -2,9 +2,9 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { doc, runTransaction, serverTimestamp } from 'firebase/firestore';
-import { Bot, CheckCircle2, Copy, Link2, Play, Plus, UserRound, X } from 'lucide-react';
+import { Bot, CheckCircle2, Copy, Link2, Play, Plus, X } from 'lucide-react';
 import { CASE_BRIEFING, createCaseSeed, createSeededRandom, seededShuffle } from '../shared/caseData';
-import { BOT_NAME, CASE_TAGLINE, CASE_TITLE, ROOM_MAX_PLAYERS } from '../shared/constants';
+import { BOT_NAME, CASE_TITLE, ROOM_MAX_PLAYERS } from '../shared/constants';
 import { buildCaseSetup, createPrivatePlayerPayload, createPublicPlayerPayload } from '../shared/setup';
 import { getDisplayName, isPlayerStaleFromPresence, toMillis } from '../shared/utils';
 
@@ -42,13 +42,12 @@ export default function Lobby({
 
   const isHost = roomData?.hostId === user?.uid;
   const isJoined = !!user?.uid && players.some((player) => player.id === user.uid);
-  const roomPresenceAt = useMemo(() => toMillis(roomData?.presenceAt || roomData?.updatedAt || 0), [roomData?.presenceAt, roomData?.updatedAt]);
   const lobbyPlayers = useMemo(() => buildLobbyOrder(roomData, players), [roomData, players]);
-  const botCount = lobbyPlayers.filter((player) => player.isBot).length;
+  const roomPresenceAt = useMemo(() => toMillis(roomData?.presenceAt || roomData?.updatedAt || 0), [roomData?.presenceAt, roomData?.updatedAt]);
 
   useEffect(() => {
     if (!notice) return undefined;
-    const timer = window.setTimeout(() => setNotice(null), 1800);
+    const timer = window.setTimeout(() => setNotice(null), 1600);
     return () => window.clearTimeout(timer);
   }, [notice]);
 
@@ -60,7 +59,7 @@ export default function Lobby({
 
   const requireUser = () => {
     if (user?.uid) return true;
-    pushNotice('error', '잠시 후 다시 눌러 줘.');
+    pushNotice('error', '잠시 후 다시 눌러라.');
     return false;
   };
 
@@ -71,23 +70,17 @@ export default function Lobby({
       await navigator.clipboard.writeText(`${baseUrl}?room=${roomCode}`);
       if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
       setCopyStatus('copied');
-      pushNotice('success', '링크 복사 완료');
+      pushNotice('success', '복사됨');
       copyTimerRef.current = window.setTimeout(() => setCopyStatus(null), 1200);
     } catch {
-      if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
-      setCopyStatus('error');
       pushNotice('error', '복사 실패');
-      copyTimerRef.current = window.setTimeout(() => setCopyStatus(null), 1200);
     }
   };
 
   const handleCreate = async () => {
     if (!requireUser()) return;
     const nickname = playerName.trim();
-    if (!nickname) {
-      pushNotice('error', '이름을 적어 줘.');
-      return;
-    }
+    if (!nickname) return pushNotice('error', '이름을 적어라.');
 
     try {
       let createdCode = null;
@@ -98,7 +91,7 @@ export default function Lobby({
         const playerRef = doc(db, 'rooms', code, 'players', user.uid);
         const playerPrivateRef = doc(db, 'rooms', code, 'playersPrivate', user.uid);
         const seed = createCaseSeed();
-        const caseSetup = buildCaseSetup({ seed, playerCount: 1 });
+        const caseSetup = buildCaseSetup({ seed });
 
         let collided = false;
         await runTransaction(db, async (tx) => {
@@ -107,11 +100,10 @@ export default function Lobby({
             collided = true;
             return;
           }
-
           tx.set(roomRef, {
             hostId: user.uid,
             status: 'lobby',
-            schemaVersion: 4,
+            schemaVersion: 5,
             caseSeed: seed,
             lobbyPlayerIds: [user.uid],
             caseTitle: caseSetup.public.caseTitle,
@@ -121,7 +113,6 @@ export default function Lobby({
             decks: caseSetup.public.decks,
             witnessStrip: caseSetup.public.witnessStrip,
             nobles: caseSetup.public.nobles,
-            bank: caseSetup.public.bank,
             turnOrder: [],
             turnIndex: 0,
             turnNumber: 1,
@@ -137,23 +128,18 @@ export default function Lobby({
             presenceAt: serverTimestamp(),
           });
           tx.set(roomPrivateRef, caseSetup.private);
-          tx.set(playerRef, {
-            ...createPublicPlayerPayload(nickname, false),
-            online: true,
-            lastSeenAt: serverTimestamp(),
-          });
+          tx.set(playerRef, { ...createPublicPlayerPayload(nickname, false), online: true, lastSeenAt: serverTimestamp() });
           tx.set(playerPrivateRef, createPrivatePlayerPayload());
         });
 
         if (!collided) createdCode = code;
       }
-
-      if (!createdCode) throw new Error('다시 눌러 줘.');
+      if (!createdCode) throw new Error('다시 눌러라.');
       setRoomCode(createdCode);
       setIsInviteMode(false);
-      pushNotice('success', `${createdCode} 생성`);
+      pushNotice('success', `${createdCode}`);
     } catch (error) {
-      pushNotice('error', error?.message || '방 생성 실패');
+      pushNotice('error', error?.message || '실패');
     }
   };
 
@@ -161,14 +147,8 @@ export default function Lobby({
     if (!requireUser()) return;
     const nickname = playerName.trim();
     const code = roomCode.trim().toUpperCase();
-    if (!nickname) {
-      pushNotice('error', '이름을 적어 줘.');
-      return;
-    }
-    if (code.length !== 4) {
-      pushNotice('error', '코드 4자리');
-      return;
-    }
+    if (!nickname) return pushNotice('error', '이름을 적어라.');
+    if (code.length !== 4) return pushNotice('error', '코드 4자리.');
 
     try {
       const roomRef = doc(db, 'rooms', code);
@@ -182,111 +162,77 @@ export default function Lobby({
         if (room.status !== 'lobby') throw new Error('이미 시작됐다.');
 
         const lobbyIds = Array.isArray(room.lobbyPlayerIds) ? [...room.lobbyPlayerIds] : [];
-        const alreadyJoined = lobbyIds.includes(user.uid);
-        if (!alreadyJoined && lobbyIds.length >= ROOM_MAX_PLAYERS) throw new Error('방이 가득 찼다.');
-        if (!alreadyJoined) lobbyIds.push(user.uid);
+        if (!lobbyIds.includes(user.uid) && lobbyIds.length >= ROOM_MAX_PLAYERS) throw new Error('가득 찼다.');
+        if (!lobbyIds.includes(user.uid)) lobbyIds.push(user.uid);
 
-        tx.set(roomRef, {
-          lobbyPlayerIds: lobbyIds,
-          updatedAt: serverTimestamp(),
-          presenceAt: serverTimestamp(),
-        }, { merge: true });
-        tx.set(playerRef, {
-          ...createPublicPlayerPayload(nickname, false),
-          name: nickname,
-          online: true,
-          lastSeenAt: serverTimestamp(),
-        }, { merge: true });
+        tx.set(roomRef, { lobbyPlayerIds: lobbyIds, updatedAt: serverTimestamp(), presenceAt: serverTimestamp() }, { merge: true });
+        tx.set(playerRef, { ...createPublicPlayerPayload(nickname, false), name: nickname, online: true, lastSeenAt: serverTimestamp() }, { merge: true });
         tx.set(playerPrivateRef, createPrivatePlayerPayload(), { merge: true });
       });
 
       setRoomCode(code);
       setIsInviteMode(false);
-      pushNotice('success', `${code} 입장`);
+      pushNotice('success', `${code}`);
     } catch (error) {
-      pushNotice('error', error?.message || '입장 실패');
+      pushNotice('error', error?.message || '실패');
     }
   };
 
   const handleAddBot = async () => {
     if (!isHost) return;
-    if (lobbyPlayers.length >= ROOM_MAX_PLAYERS) {
-      pushNotice('error', '자리가 없다.');
-      return;
-    }
-
+    if (lobbyPlayers.length >= ROOM_MAX_PLAYERS) return pushNotice('error', '가득 찼다.');
     const botId = createBotId();
-    const botName = botCount > 0 ? `${BOT_NAME} ${botCount + 1}` : BOT_NAME;
+    const botIndex = lobbyPlayers.filter((player) => player.isBot).length + 1;
+    const botName = botIndex > 1 ? `${BOT_NAME} ${botIndex}` : BOT_NAME;
 
     try {
       const roomRef = doc(db, 'rooms', roomCode);
       const playerRef = doc(db, 'rooms', roomCode, 'players', botId);
       const playerPrivateRef = doc(db, 'rooms', roomCode, 'playersPrivate', botId);
-
       await runTransaction(db, async (tx) => {
         const roomSnap = await tx.get(roomRef);
         if (!roomSnap.exists()) throw new Error('방이 없다.');
         const room = roomSnap.data();
         if (room.status !== 'lobby') throw new Error('이미 시작됐다.');
         const lobbyIds = Array.isArray(room.lobbyPlayerIds) ? [...room.lobbyPlayerIds] : [];
-        if (lobbyIds.length >= ROOM_MAX_PLAYERS) throw new Error('자리가 없다.');
+        if (lobbyIds.length >= ROOM_MAX_PLAYERS) throw new Error('가득 찼다.');
         lobbyIds.push(botId);
-
-        tx.set(roomRef, {
-          lobbyPlayerIds: lobbyIds,
-          updatedAt: serverTimestamp(),
-          presenceAt: serverTimestamp(),
-        }, { merge: true });
-        tx.set(playerRef, {
-          ...createPublicPlayerPayload(botName, true),
-          online: true,
-          lastSeenAt: serverTimestamp(),
-        });
+        tx.set(roomRef, { lobbyPlayerIds: lobbyIds, updatedAt: serverTimestamp(), presenceAt: serverTimestamp() }, { merge: true });
+        tx.set(playerRef, { ...createPublicPlayerPayload(botName, true), name: botName, isBot: true, online: true, lastSeenAt: serverTimestamp() });
         tx.set(playerPrivateRef, createPrivatePlayerPayload());
       });
-
-      pushNotice('success', `${botName} 추가`);
+      pushNotice('success', '봇 추가');
     } catch (error) {
-      pushNotice('error', error?.message || '추가 실패');
+      pushNotice('error', error?.message || '실패');
     }
   };
 
   const handleRemoveBot = async (botId) => {
     if (!isHost || !botId) return;
-
     try {
       const roomRef = doc(db, 'rooms', roomCode);
       const playerRef = doc(db, 'rooms', roomCode, 'players', botId);
       const playerPrivateRef = doc(db, 'rooms', roomCode, 'playersPrivate', botId);
-
       await runTransaction(db, async (tx) => {
         const roomSnap = await tx.get(roomRef);
         if (!roomSnap.exists()) throw new Error('방이 없다.');
         const room = roomSnap.data();
         const lobbyIds = Array.isArray(room.lobbyPlayerIds) ? room.lobbyPlayerIds.filter((id) => id !== botId) : [];
-
-        tx.set(roomRef, {
-          lobbyPlayerIds: lobbyIds,
-          updatedAt: serverTimestamp(),
-          presenceAt: serverTimestamp(),
-        }, { merge: true });
+        tx.set(roomRef, { lobbyPlayerIds: lobbyIds, updatedAt: serverTimestamp(), presenceAt: serverTimestamp() }, { merge: true });
         tx.delete(playerRef);
         tx.delete(playerPrivateRef);
       });
-
-      pushNotice('success', '기록관 제거');
+      pushNotice('success', '봇 제거');
     } catch (error) {
-      pushNotice('error', error?.message || '제거 실패');
+      pushNotice('error', error?.message || '실패');
     }
   };
 
   const handleStart = async () => {
     if (!isHost) return;
-
     try {
       const roomRef = doc(db, 'rooms', roomCode);
       const roomPrivateRef = doc(db, 'rooms', roomCode, 'meta', 'private');
-
       await runTransaction(db, async (tx) => {
         const roomSnap = await tx.get(roomRef);
         if (!roomSnap.exists()) throw new Error('방이 없다.');
@@ -311,7 +257,7 @@ export default function Lobby({
         if (!live.length) throw new Error('참가자가 없다.');
 
         const seed = createCaseSeed();
-        const caseSetup = buildCaseSetup({ seed, playerCount: live.length });
+        const caseSetup = buildCaseSetup({ seed });
         const random = createSeededRandom(`${seed}:turnOrder`);
         const turnOrder = seededShuffle(live, random);
         const firstPlayerId = turnOrder[0];
@@ -339,7 +285,6 @@ export default function Lobby({
           decks: caseSetup.public.decks,
           witnessStrip: caseSetup.public.witnessStrip,
           nobles: caseSetup.public.nobles,
-          bank: caseSetup.public.bank,
           turnOrder,
           turnIndex: 0,
           turnNumber: 1,
@@ -348,6 +293,7 @@ export default function Lobby({
           finalRound: null,
           winnerId: null,
           reveal: null,
+          finalReports: null,
           logSeq: 1,
           log: [{ seq: 1, ts: Date.now(), type: 'GAME_START', actorId: user.uid, message: `${getDisplayName(playerDocs.get(firstPlayerId))}부터 시작한다.` }],
           updatedAt: serverTimestamp(),
@@ -355,36 +301,23 @@ export default function Lobby({
         }, { merge: true });
         tx.set(roomPrivateRef, caseSetup.private, { merge: false });
       });
-
-      pushNotice('success', '수사 시작');
+      pushNotice('success', '시작');
     } catch (error) {
-      pushNotice('error', error?.message || '시작 실패');
+      pushNotice('error', error?.message || '실패');
     }
   };
-
-  const headline = roomData?.status === 'lobby' && isJoined ? '대기 중' : '방을 열거나 들어가라';
 
   return (
     <div className="app-shell game-surface">
       <div className="mx-auto min-h-screen w-full max-w-[480px] px-3 py-4">
         <section className="panel overflow-hidden">
           <div className="border-b border-white/10 px-4 py-5">
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <div className="text-[11px] font-black tracking-[0.22em] text-amber-200/80">사건 파일</div>
-                <h1 className="mt-2 text-2xl font-black text-white">{CASE_TITLE}</h1>
-                <p className="mt-2 text-sm font-bold text-slate-300">{CASE_BRIEFING.join(' ')}</p>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-slate-950/45 px-3 py-2 text-right">
-                <div className="text-[11px] font-black tracking-[0.18em] text-slate-400">방 코드</div>
-                <div className="mt-1 text-xl font-black text-white">{roomCode || '----'}</div>
-              </div>
-            </div>
+            <div className="text-[11px] font-black tracking-[0.22em] text-amber-200/80">사건 파일</div>
+            <h1 className="mt-2 text-2xl font-black text-white">{CASE_TITLE}</h1>
+            <p className="mt-2 text-sm font-bold text-slate-300">{CASE_BRIEFING.join(' ')}</p>
           </div>
 
           <div className="grid gap-4 px-4 py-4">
-            <div className="text-sm font-black text-slate-200">{headline}</div>
-
             <label className="panel-soft px-4 py-3">
               <div className="text-[11px] font-black tracking-[0.16em] text-slate-400">이름</div>
               <input
@@ -406,53 +339,29 @@ export default function Lobby({
             </label>
 
             <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={handleCreate}
-                className="tap-feedback min-h-12 rounded-2xl border border-emerald-300/25 bg-emerald-500/12 px-4 py-3 text-sm font-black text-emerald-50"
-              >
-                <span className="inline-flex items-center gap-2"><Plus size={16} /> 방 생성</span>
+              <button type="button" onClick={handleCreate} className="tap-feedback min-h-12 rounded-2xl border border-emerald-300/25 bg-emerald-500/12 px-4 py-3 text-sm font-black text-emerald-50">
+                <span className="inline-flex items-center gap-2"><Plus size={16} /> 방 만들기</span>
               </button>
-              <button
-                type="button"
-                onClick={handleJoin}
-                className="tap-feedback min-h-12 rounded-2xl border border-sky-300/25 bg-sky-500/12 px-4 py-3 text-sm font-black text-sky-50"
-              >
+              <button type="button" onClick={handleJoin} className="tap-feedback min-h-12 rounded-2xl border border-sky-300/25 bg-sky-500/12 px-4 py-3 text-sm font-black text-sky-50">
                 <span className="inline-flex items-center gap-2"><Link2 size={16} /> 입장</span>
               </button>
             </div>
 
             {isInviteMode ? (
-              <div className="rounded-2xl border border-sky-300/20 bg-sky-500/10 px-4 py-3 text-sm font-black text-sky-50">
-                초대 링크로 들어왔다.
-              </div>
+              <div className="rounded-2xl border border-sky-300/20 bg-sky-500/10 px-4 py-3 text-sm font-black text-sky-50">초대 링크로 들어왔다.</div>
             ) : null}
 
             {roomData?.status === 'lobby' ? (
               <div className="rounded-3xl border border-white/10 bg-slate-950/36 p-3">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="text-sm font-black text-white">대기열 {lobbyPlayers.length}/{ROOM_MAX_PLAYERS}</div>
+                  <div className="text-sm font-black text-white">대기 {lobbyPlayers.length}/{ROOM_MAX_PLAYERS}</div>
                   <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={copyInviteLink}
-                      disabled={!roomCode}
-                      className={[
-                        'tap-feedback rounded-2xl border px-3 py-2 text-sm font-black',
-                        copyStatus === 'copied'
-                          ? 'border-emerald-300/25 bg-emerald-500/12 text-emerald-50'
-                          : 'border-white/10 bg-slate-900/58 text-slate-100',
-                      ].join(' ')}
-                    >
+                    <button type="button" onClick={copyInviteLink} disabled={!roomCode} className={`tap-feedback rounded-2xl border px-3 py-2 text-sm font-black ${copyStatus === 'copied' ? 'border-emerald-300/25 bg-emerald-500/12 text-emerald-50' : 'border-white/10 bg-slate-900/58 text-slate-100'}`}>
                       <span className="inline-flex items-center gap-2"><Copy size={14} /> {copyStatus === 'copied' ? '복사됨' : '복사'}</span>
                     </button>
                     {isHost ? (
-                      <button
-                        type="button"
-                        onClick={handleAddBot}
-                        className="tap-feedback rounded-2xl border border-white/10 bg-slate-900/58 px-3 py-2 text-sm font-black text-slate-100"
-                      >
-                        <span className="inline-flex items-center gap-2"><Bot size={14} /> 기록관+</span>
+                      <button type="button" onClick={handleAddBot} className="tap-feedback rounded-2xl border border-white/10 bg-slate-900/58 px-3 py-2 text-sm font-black text-slate-100">
+                        <span className="inline-flex items-center gap-2"><Bot size={14} /> 봇 추가</span>
                       </button>
                     ) : null}
                   </div>
@@ -467,37 +376,24 @@ export default function Lobby({
                           <div className="truncate text-sm font-black text-white">{getDisplayName(player)}</div>
                           <div className="mt-1 flex flex-wrap gap-2 text-[11px] font-black text-slate-300">
                             {player.id === roomData?.hostId ? <span className="rounded-full border border-amber-300/25 bg-amber-500/12 px-2 py-0.5 text-amber-100">주최</span> : null}
-                            {player.isBot ? <span className="rounded-full border border-sky-300/25 bg-sky-500/12 px-2 py-0.5 text-sky-100">기록관</span> : null}
-                            {!player.isBot ? (
-                              <span className={`rounded-full border px-2 py-0.5 ${stale ? 'border-rose-300/25 bg-rose-500/12 text-rose-100' : 'border-emerald-300/25 bg-emerald-500/12 text-emerald-100'}`}>
-                                {stale ? '비움' : '대기'}
-                              </span>
-                            ) : null}
+                            {player.isBot ? <span className="rounded-full border border-sky-300/25 bg-sky-500/12 px-2 py-0.5 text-sky-100">봇</span> : null}
+                            {!player.isBot ? <span className={`rounded-full border px-2 py-0.5 ${stale ? 'border-rose-300/25 bg-rose-500/12 text-rose-100' : 'border-emerald-300/25 bg-emerald-500/12 text-emerald-100'}`}>{stale ? '비움' : '대기'}</span> : null}
                           </div>
                         </div>
                         {isHost && player.isBot ? (
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveBot(player.id)}
-                            className="tap-feedback rounded-2xl border border-white/10 bg-slate-900/60 p-2 text-slate-300"
-                            aria-label="제거"
-                          >
+                          <button type="button" onClick={() => handleRemoveBot(player.id)} className="tap-feedback rounded-2xl border border-white/10 bg-slate-900/60 p-2 text-slate-300" aria-label="제거">
                             <X size={15} />
                           </button>
                         ) : null}
                       </div>
                     );
                   }) : (
-                    <div className="panel-soft px-4 py-4 text-sm font-black text-slate-400">아직 비어 있다.</div>
+                    <div className="panel-soft px-4 py-4 text-sm font-black text-slate-400">비어 있다.</div>
                   )}
                 </div>
 
                 {isHost && isJoined ? (
-                  <button
-                    type="button"
-                    onClick={handleStart}
-                    className="tap-feedback mt-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-amber-300/30 bg-amber-500/14 px-4 py-3 text-sm font-black text-amber-50"
-                  >
+                  <button type="button" onClick={handleStart} className="tap-feedback mt-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl border border-amber-300/30 bg-amber-500/14 px-4 py-3 text-sm font-black text-amber-50">
                     <Play size={16} /> 수사 시작
                   </button>
                 ) : null}
@@ -505,16 +401,8 @@ export default function Lobby({
             ) : null}
 
             {notice ? (
-              <div className={[
-                'rounded-2xl border px-4 py-3 text-sm font-black',
-                notice.tone === 'success'
-                  ? 'border-emerald-300/25 bg-emerald-500/12 text-emerald-50'
-                  : 'border-rose-300/25 bg-rose-500/12 text-rose-50',
-              ].join(' ')}>
-                <span className="inline-flex items-center gap-2">
-                  {notice.tone === 'success' ? <CheckCircle2 size={15} /> : <X size={15} />}
-                  {notice.text}
-                </span>
+              <div className={`${notice.tone === 'success' ? 'border-emerald-300/25 bg-emerald-500/12 text-emerald-50' : 'border-rose-300/25 bg-rose-500/12 text-rose-50'} rounded-2xl border px-4 py-3 text-sm font-black`}>
+                <span className="inline-flex items-center gap-2">{notice.tone === 'success' ? <CheckCircle2 size={15} /> : <X size={15} />}{notice.text}</span>
               </div>
             ) : null}
           </div>

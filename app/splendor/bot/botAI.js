@@ -1,113 +1,17 @@
-import { ALL, COLORS, MAX_GEMS } from '../shared/constants';
-import { METHODS, MOTIVES, SUSPECTS } from '../shared/caseData';
-import {
-  canAccuse,
-  canSecureClue,
-  canTakeLeadSelection,
-  computeCluePayment,
-  enumerateLeadSelections,
-  getAffordableState,
-  getPlayerInsights,
-  getRemainingMethodIds,
-  getRemainingMotiveIds,
-  getRemainingSuspectIds,
-  getTotalResources,
-} from '../shared/utils';
+import { canAccuse, canCrosscheck, canFileLead, canInterrogate, getAvailableCrosschecks, getPinnedThreads, getRemainingMethodIds, getRemainingMotiveIds, getRemainingSuspectIds, witnessUnlockState } from '../shared/utils';
 
 function flattenBoard(board = {}) {
   return [...(board?.[1] || []), ...(board?.[2] || []), ...(board?.[3] || [])];
 }
 
-function clueValue(card, bot) {
-  const effectSize = (card?.effect?.eliminateSuspects?.length || 0)
-    + (card?.effect?.eliminateMotives?.length || 0)
-    + (card?.effect?.eliminateMethods?.length || 0);
-  const progress = Number(card?.progress || card?.points || 0);
-  const tierWeight = Number(card?.tier || 0) * 0.8;
-  const missing = Object.values(getAffordableState(card, bot).missing || {}).reduce((sum, value) => sum + value, 0);
-  return (progress * 4) + (effectSize * 2.6) + tierWeight - (missing * 0.7);
+function effectSize(effect = {}) {
+  return (effect.eliminateSuspects?.length || 0) + (effect.eliminateMotives?.length || 0) + (effect.eliminateMethods?.length || 0);
 }
 
-function pickAffordableClue(roomData, bot) {
-  const visible = flattenBoard(roomData.board).filter((card) => canSecureClue(card, bot));
-  const reserved = (bot.reservedLeads || bot.reserved || []).filter((card) => canSecureClue(card, bot));
-  const bestBoard = [...visible].sort((a, b) => clueValue(b, bot) - clueValue(a, bot))[0] || null;
-  const bestReserved = [...reserved].sort((a, b) => clueValue(b, bot) - clueValue(a, bot))[0] || null;
-  if (bestBoard && bestReserved) {
-    return clueValue(bestBoard, bot) >= clueValue(bestReserved, bot)
-      ? { card: bestBoard, fromReserved: false }
-      : { card: bestReserved, fromReserved: true };
-  }
-  if (bestBoard) return { card: bestBoard, fromReserved: false };
-  if (bestReserved) return { card: bestReserved, fromReserved: true };
-  return null;
-}
-
-function pickTargetCard(roomData, bot) {
-  const candidates = [
-    ...flattenBoard(roomData.board).map((card) => ({ card, fromReserved: false })),
-    ...((bot.reservedLeads || bot.reserved || []).map((card) => ({ card, fromReserved: true }))),
-  ];
-
-  return candidates
-    .map((entry) => {
-      const payment = computeCluePayment(entry.card, bot);
-      const missing = Object.values(payment || {}).reduce((sum, value) => sum + value, 0) - Number((bot.resources || bot.gems || {}).gold || 0);
-      return {
-        ...entry,
-        score: clueValue(entry.card, bot) - Math.max(0, missing) * 0.75,
-      };
-    })
-    .sort((a, b) => b.score - a.score)[0] || null;
-}
-
-function pickLeadSelection(roomData, bot) {
-  const bank = roomData.bank || {};
-  const selections = enumerateLeadSelections(bank);
-  if (!selections.length) return null;
-
-  const target = pickTargetCard(roomData, bot);
-  if (!target) {
-    return selections.sort((a, b) => b.length - a.length)[0];
-  }
-
-  const missing = getAffordableState(target.card, bot).missing;
-  const scored = selections.map((selection) => {
-    const unique = new Set(selection);
-    let value = selection.length * 0.5;
-    for (const color of unique) {
-      value += (missing[color] || 0) * (selection.filter((item) => item === color).length + 0.2);
-    }
-    if (getTotalResources(bot.resources || bot.gems) + selection.length > MAX_GEMS) value -= 3;
-    return { selection, value };
-  }).sort((a, b) => b.value - a.value);
-
-  return scored[0]?.selection || null;
-}
-
-function pickReserveAction(roomData, bot) {
-  if ((bot.reservedLeads || bot.reserved || []).length >= 3) return null;
-  const bestVisible = flattenBoard(roomData.board)
-    .map((card) => ({ card, value: clueValue(card, bot) }))
-    .sort((a, b) => b.value - a.value)[0];
-  if (bestVisible) return { type: 'PIN_LEAD', payload: { cardId: bestVisible.card.id } };
-
-  for (const tier of [3, 2, 1]) {
-    if (Number(roomData?.decks?.[tier]?.length || 0) > 0) return { type: 'PIN_TOP_LEAD', payload: { tier } };
-  }
-  return null;
-}
-
-function bestDiscardColor(resources = {}) {
-  return [...ALL].sort((a, b) => Number(resources?.[b] || 0) - Number(resources?.[a] || 0))[0] || 'white';
-}
-
-function pickAccusation(bot) {
-  if (!canAccuse(bot)) return null;
-  const notebook = bot.notebook || {};
-  const suspects = getRemainingSuspectIds(notebook);
-  const motives = getRemainingMotiveIds(notebook);
-  const methods = getRemainingMethodIds(notebook);
+function chooseAccusation(bot) {
+  const suspects = getRemainingSuspectIds(bot.notebook || {});
+  const motives = getRemainingMotiveIds(bot.notebook || {});
+  const methods = getRemainingMethodIds(bot.notebook || {});
   if (suspects.length === 1 && motives.length === 1 && methods.length === 1) {
     return {
       type: 'ACCUSE',
@@ -121,35 +25,89 @@ function pickAccusation(bot) {
   return null;
 }
 
+function chooseWitness(roomData, bot) {
+  const available = (roomData?.witnessStrip || []).filter((witness) => canInterrogate(bot, witness));
+  if (!available.length) return null;
+  const best = [...available].sort((a, b) => effectSize(b.effect) - effectSize(a.effect))[0];
+  return { type: 'INTERROGATE', payload: { witnessId: best.id } };
+}
+
+function chooseCrosscheck(bot) {
+  if (!canCrosscheck(bot)) return null;
+  const pairs = getAvailableCrosschecks(bot);
+  if (!pairs.length) return null;
+  const best = [...pairs].sort((a, b) => {
+    const scoreA = effectSize(a.a.directives) + effectSize(a.b.directives) + a.sharedThreads.length;
+    const scoreB = effectSize(b.a.directives) + effectSize(b.b.directives) + b.sharedThreads.length;
+    return scoreB - scoreA;
+  })[0];
+  return { type: 'CROSSCHECK', payload: { aId: best.a.id, bId: best.b.id } };
+}
+
+function chooseLead(bot, roomData) {
+  if (!canFileLead(bot)) return null;
+  const pinnedThreads = getPinnedThreads(bot);
+  const lockedWitnesses = (roomData?.witnessStrip || []).map((witness) => ({
+    witness,
+    state: witnessUnlockState(bot, witness),
+  })).filter((item) => !item.state.ready);
+
+  const candidates = (bot.privateClues || []).filter((clue) => !(bot.reservedLeads || []).some((lead) => lead.id === clue.id));
+  if (!candidates.length) return null;
+
+  const scored = candidates.map((clue) => {
+    let value = effectSize(clue.directives || {}) + (clue.threads?.length || 0) * 0.3;
+    for (const item of lockedWitnesses) {
+      for (const thread of item.state.missingThreads) {
+        if ((clue.threads || []).includes(thread) && !pinnedThreads.has(thread)) value += 2.5;
+      }
+    }
+    return { clue, value };
+  }).sort((a, b) => b.value - a.value);
+
+  return scored[0] ? { type: 'FILE_LEAD', payload: { clueId: scored[0].clue.id } } : null;
+}
+
+function chooseClue(roomData, bot) {
+  const clues = flattenBoard(roomData?.board || {});
+  if (!clues.length) return null;
+
+  const lockedWitnesses = (roomData?.witnessStrip || []).map((witness) => ({
+    witness,
+    state: witnessUnlockState(bot, witness),
+  })).filter((item) => !item.state.ready);
+
+  const scored = clues.map((clue) => {
+    let value = effectSize(clue.directives || {});
+    for (const item of lockedWitnesses) {
+      for (const thread of item.state.missingThreads) {
+        if ((clue.threads || []).includes(thread)) value += 1.5;
+      }
+    }
+    return { clue, value };
+  }).sort((a, b) => b.value - a.value);
+
+  return scored[0] ? { type: 'TAKE_CLUE', payload: { cardId: scored[0].clue.id } } : null;
+}
+
 export function chooseBotAction(roomData, bot) {
-  if (!roomData || !bot) return { type: 'END_TURN', payload: {} };
-
-  const accusation = pickAccusation(bot);
-  if (accusation) return accusation;
-
-  const immediate = pickAffordableClue(roomData, bot);
-  if (immediate) {
-    return {
-      type: 'SECURE_CLUE',
-      payload: { cardId: immediate.card.id, fromReserved: immediate.fromReserved },
-    };
+  const accusationReady = canAccuse(bot, roomData);
+  if (accusationReady) {
+    const accusation = chooseAccusation(bot);
+    if (accusation) return accusation;
   }
 
-  const take = pickLeadSelection(roomData, bot);
-  if (take && canTakeLeadSelection(take, roomData.bank || {}).ok) {
-    return { type: 'COLLECT_LEADS', payload: { selected: take } };
-  }
+  const witness = chooseWitness(roomData, bot);
+  if (witness) return witness;
 
-  const reserve = pickReserveAction(roomData, bot);
-  if (reserve) return reserve;
+  const crosscheck = chooseCrosscheck(bot);
+  if (crosscheck) return crosscheck;
+
+  const lead = chooseLead(bot, roomData);
+  if (lead) return lead;
+
+  const clue = chooseClue(roomData, bot);
+  if (clue) return clue;
 
   return { type: 'END_TURN', payload: {} };
-}
-
-export function chooseBotDiscard(resources = {}) {
-  return bestDiscardColor(resources);
-}
-
-export function chooseBotWitness(pending = {}) {
-  return Array.isArray(pending?.options) && pending.options.length ? pending.options[0] : null;
 }

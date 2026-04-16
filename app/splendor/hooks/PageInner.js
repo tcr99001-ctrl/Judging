@@ -36,12 +36,14 @@ export default function PageInner() {
   const [playerName, setPlayerName] = useState('');
   const [isInviteMode, setIsInviteMode] = useState(false);
   const [activeCard, setActiveCard] = useState(null);
-  const [showLeadModal, setShowLeadModal] = useState(false);
-  const [selectedLeads, setSelectedLeads] = useState([]);
-  const [copyStatus, setCopyStatus] = useState(null);
+  const [activeSource, setActiveSource] = useState('board');
   const [guideOpen, setGuideOpen] = useState(false);
+  const [crosscheckOpen, setCrosscheckOpen] = useState(false);
+  const [leadManagerOpen, setLeadManagerOpen] = useState(false);
+  const [witnessModal, setWitnessModal] = useState(null);
   const [opponent, setOpponent] = useState(null);
   const [showAccuse, setShowAccuse] = useState(false);
+  const [copyStatus, setCopyStatus] = useState(null);
   const [toasts, setToasts] = useState([]);
   const toastTimersRef = useRef(new Map());
   const copyTimerRef = useRef(null);
@@ -54,7 +56,7 @@ export default function PageInner() {
     const timer = window.setTimeout(() => {
       setToasts((current) => current.filter((item) => item.id !== id));
       toastTimersRef.current.delete(id);
-    }, 1500);
+    }, 1450);
     toastTimersRef.current.set(id, timer);
   }, []);
 
@@ -65,15 +67,12 @@ export default function PageInner() {
   }, []);
 
   const { roomData, players } = useRoomSync({ db, roomCode, userId: user?.uid });
-
-  const isParticipant = useMemo(() => !!user?.uid && players.some((player) => player.id === user.uid), [players, user?.uid]);
   const myData = useMemo(() => players.find((player) => player.id === user?.uid) || null, [players, user?.uid]);
+  const isParticipant = useMemo(() => !!user?.uid && players.some((player) => player.id === user.uid), [players, user?.uid]);
   const currentId = roomData?.turnOrder?.[roomData?.turnIndex] || null;
   const currentPlayer = players.find((player) => player.id === currentId) || null;
   const isMyTurn = !!user?.uid && currentId === user.uid && (roomData?.status === 'playing' || roomData?.status === 'final_round');
-  const pending = roomData?.pending || null;
-  const pendingForMe = !!pending && pending.playerId === user?.uid;
-  const lockUsed = !!roomData?.actionLock?.used && roomData?.actionLock?.playerId === user?.uid && roomData?.actionLock?.turnIndex === roomData?.turnIndex;
+  const actionUsed = !!roomData?.actionLock?.used && roomData?.actionLock?.playerId === user?.uid && roomData?.actionLock?.turnIndex === roomData?.turnIndex;
 
   useEffect(() => {
     if (!db || !roomCode || roomCode.length !== 4 || !user?.uid || !isParticipant) return undefined;
@@ -103,33 +102,21 @@ export default function PageInner() {
   }, [db, isParticipant, roomCode, user?.uid]);
 
   useEffect(() => {
-    if (!roomData) {
+    if (!roomData || roomData.status === 'lobby') {
       setActiveCard(null);
-      setShowLeadModal(false);
-      setSelectedLeads([]);
-      setGuideOpen(false);
-      setOpponent(null);
-      setShowAccuse(false);
-      return;
-    }
-
-    if (roomData.status === 'lobby') {
-      setActiveCard(null);
-      setShowLeadModal(false);
-      setSelectedLeads([]);
+      setCrosscheckOpen(false);
+      setLeadManagerOpen(false);
+      setWitnessModal(null);
       setOpponent(null);
       setShowAccuse(false);
     }
   }, [roomData]);
 
   useEffect(() => {
-    if (!activeCard?.id) return;
-    const ids = new Set([
-      ...[1, 2, 3].flatMap((tier) => (roomData?.board?.[tier] || []).map((card) => card?.id).filter(Boolean)),
-      ...((myData?.reservedLeads || myData?.reserved || []).map((card) => card?.id).filter(Boolean)),
-    ]);
-    if (!ids.has(activeCard.id)) setActiveCard(null);
-  }, [activeCard?.id, myData?.reserved, myData?.reservedLeads, roomData?.board]);
+    if (!actionUsed) return;
+    setCrosscheckOpen(false);
+    setLeadManagerOpen(false);
+  }, [actionUsed]);
 
   const currentPlayerStale = useMemo(() => {
     if (!roomData || !currentPlayer || currentPlayer.isBot) return false;
@@ -159,9 +146,8 @@ export default function PageInner() {
     roomCode,
     roomData,
     userId: user?.uid,
-    fx,
     myData,
-    setActiveCard,
+    fx,
   });
 
   const withMove = useCallback(async (job, successText = '') => {
@@ -169,7 +155,7 @@ export default function PageInner() {
       await job();
       if (successText) pushToast(successText, 'success');
     } catch (error) {
-      pushToast(error?.message || '처리 실패', 'error');
+      pushToast(error?.message || '실패', 'error');
     }
   }, [pushToast]);
 
@@ -181,45 +167,39 @@ export default function PageInner() {
       setCopyStatus('copied');
       if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
       copyTimerRef.current = window.setTimeout(() => setCopyStatus(null), 1200);
-      pushToast('링크 복사 완료', 'success');
+      pushToast('복사됨', 'success');
     } catch {
-      setCopyStatus('error');
-      if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
-      copyTimerRef.current = window.setTimeout(() => setCopyStatus(null), 1200);
       pushToast('복사 실패', 'error');
     }
   }, [pushToast, roomCode]);
 
-  const handleConfirmLeads = useCallback(async (selected) => {
-    await withMove(() => actions.confirmCollectLeads(selected), '자원 확보');
-    setSelectedLeads([]);
-    setShowLeadModal(false);
-  }, [actions, withMove]);
+  const openCard = useCallback((card, source = 'board') => {
+    setActiveCard(card);
+    setActiveSource(source);
+  }, []);
 
-  const handleSecureCard = useCallback(async (card, fromReserved = false) => {
-    await withMove(() => actions.onSecureClue(card, fromReserved), '단서 확보');
+  const handleTake = useCallback(async (cardId) => {
+    await withMove(() => actions.onTakeClue(cardId), '단서 확보');
     setActiveCard(null);
   }, [actions, withMove]);
 
-  const handlePinCard = useCallback(async (card) => {
-    await withMove(() => actions.onPinLead(card), '리드 고정');
+  const handleToggleLead = useCallback(async (clueId) => {
+    await withMove(() => actions.onFileLead(clueId), '리드 정리');
     setActiveCard(null);
   }, [actions, withMove]);
 
-  const handlePinTopLead = useCallback(async (tier) => {
-    await withMove(() => actions.onPinTopLead(tier), '상단 리드 고정');
+  const handleCrosscheck = useCallback(async ({ aId, bId }) => {
+    await withMove(() => actions.onCrosscheck({ aId, bId }), '대조 완료');
+    setCrosscheckOpen(false);
   }, [actions, withMove]);
 
-  const handleDiscard = useCallback(async (color) => {
-    await withMove(() => actions.onDiscardExcess(color), '자원 정리');
-  }, [actions, withMove]);
-
-  const handleChooseWitness = useCallback(async (witnessId) => {
-    await withMove(() => actions.onChooseWitness(witnessId), '추궁 완료');
+  const handleInterrogate = useCallback(async (witnessId) => {
+    await withMove(() => actions.onInterrogate(witnessId), '추궁 완료');
+    setWitnessModal(null);
   }, [actions, withMove]);
 
   const handleAccuse = useCallback(async ({ culpritId, motiveId, methodId }) => {
-    await withMove(() => actions.onAccuse({ culpritId, motiveId, methodId }), '고발 실행');
+    await withMove(() => actions.onAccuse({ culpritId, motiveId, methodId }), '고발');
     setShowAccuse(false);
   }, [actions, withMove]);
 
@@ -229,16 +209,8 @@ export default function PageInner() {
 
   const handleForceStaleSkip = useCallback(async () => {
     if (!currentId) return;
-    await withMove(() => actions.onForceStaleSkip(currentId), '강제 정리');
+    await withMove(() => actions.onForceStaleSkip(currentId), '넘김');
   }, [actions, currentId, withMove]);
-
-  const pendingWitnesses = useMemo(() => {
-    if (pending?.type !== 'witness' || !Array.isArray(pending?.options)) return [];
-    const options = new Set(pending.options);
-    return (roomData?.witnessStrip || roomData?.nobles || []).filter((entry) => options.has(entry.id));
-  }, [pending, roomData?.nobles, roomData?.witnessStrip]);
-
-  const roomClosed = !roomCode || roomCode.length !== 4 || !roomData;
 
   if (!ready) {
     return (
@@ -248,7 +220,7 @@ export default function PageInner() {
     );
   }
 
-  if (roomClosed || roomData?.status === 'lobby') {
+  if (!roomCode || roomCode.length !== 4 || !roomData || roomData.status === 'lobby') {
     return (
       <Lobby
         db={db}
@@ -265,125 +237,71 @@ export default function PageInner() {
     );
   }
 
-  if (roomData?.status === 'ended') {
-    return (
-      <>
-        <GameOverScreen
-          roomData={roomData}
-          players={players}
-          roomCode={roomCode}
-          onCopyInvite={handleCopyInvite}
-          onGoLobby={() => {
-            setRoomCode('');
-            setIsInviteMode(false);
-          }}
-        />
-        <ToastStack items={toasts} />
-      </>
-    );
+  if (roomData.status === 'ended') {
+    return <GameOverScreen roomData={roomData} players={players} myId={user?.uid} />;
   }
 
   return (
     <div className="app-shell game-surface">
-      <GameHeader
-        roomCode={roomCode}
-        roomData={roomData}
-        players={players}
-        userId={user?.uid}
-        copyStatus={copyStatus}
-        onCopyInvite={handleCopyInvite}
-        onOpenOpponent={setOpponent}
-        isGuideOpen={guideOpen}
-        onToggleGuide={() => setGuideOpen((current) => !current)}
-        canForceStaleSkip={canForceStaleSkip}
-        onForceStaleSkip={handleForceStaleSkip}
-        staleTargetName={currentPlayer ? getDisplayName(currentPlayer) : ''}
-      />
-
-      <main className="mx-auto min-h-[calc(100dvh-72px)] w-full max-w-[480px] px-3 pb-[300px] pt-3">
-        <div className="space-y-3">
-          {guideOpen ? <BeginnerGuide mode="inline" /> : null}
-
-          <MarketGrid
-            board={roomData?.board || { 1: [], 2: [], 3: [] }}
-            decks={roomData?.decks || { 1: [], 2: [], 3: [] }}
-            isMyTurn={isMyTurn}
-            lockUsed={lockUsed}
-            pendingForMe={pendingForMe}
-            onOpenCard={setActiveCard}
-            onPinTopLead={handlePinTopLead}
+      <div className="mx-auto min-h-screen w-full max-w-[480px] px-3 pb-[calc(18rem+var(--safe-bottom))] pt-3">
+        <div className="grid gap-4">
+          <GameHeader
+            roomData={roomData}
+            roomCode={roomCode}
+            players={players}
+            myId={user?.uid}
+            currentPlayer={currentPlayer}
+            copyStatus={copyStatus}
+            onCopyInvite={handleCopyInvite}
+            onToggleGuide={() => setGuideOpen(true)}
+            onOpenPlayer={setOpponent}
           />
 
+          <MarketGrid roomData={roomData} onOpenCard={openCard} />
+
           <NobleStrip
-            witnessStrip={roomData?.witnessStrip || roomData?.nobles || []}
-            myInsights={myData?.insights || myData?.bonuses || {}}
-            pendingOptions={pending?.type === 'witness' ? pending.options || [] : []}
+            witnesses={roomData?.witnessStrip || []}
+            myData={myData || {}}
+            onOpenWitness={setWitnessModal}
           />
 
           <ReservedStrip
-            reserved={myData?.reservedLeads || myData?.reserved || []}
-            reservedCount={myData?.reservedCount || (myData?.reservedLeads || myData?.reserved || []).length || 0}
-            onOpenCard={setActiveCard}
-            playerId={user?.uid || 'ME'}
+            leads={myData?.reservedLeads || []}
+            onOpenCard={openCard}
           />
         </div>
-      </main>
+      </div>
 
       <Dashboard
-        myData={myData}
+        myData={myData || {}}
         roomData={roomData}
         isMyTurn={isMyTurn}
-        lockUsed={lockUsed}
-        pendingForMe={pendingForMe}
-        onOpenLeadModal={() => {
-          setSelectedLeads([]);
-          setShowLeadModal(true);
-        }}
+        actionUsed={actionUsed}
+        canForceStaleSkip={canForceStaleSkip}
+        onOpenLeadManager={() => setLeadManagerOpen(true)}
+        onOpenCrosscheck={() => setCrosscheckOpen(true)}
         onOpenAccuse={() => setShowAccuse(true)}
         onEndTurn={handleEndTurn}
+        onForceStaleSkip={handleForceStaleSkip}
       />
 
       <CardModal
         open={!!activeCard}
         card={activeCard}
-        myData={myData}
-        isMyTurn={isMyTurn}
-        lockUsed={lockUsed}
-        pendingForMe={pendingForMe}
+        source={activeSource}
+        canTake={activeSource === 'board' && isMyTurn && !actionUsed}
+        canToggleLead={activeSource === 'reserved' && isMyTurn && !actionUsed}
+        onTake={handleTake}
+        onToggleLead={handleToggleLead}
         onClose={() => setActiveCard(null)}
-        onSecure={handleSecureCard}
-        onPin={handlePinCard}
       />
 
-      <GemModal
-        open={showLeadModal}
-        bank={roomData?.bank || {}}
-        selected={selectedLeads}
-        setSelected={setSelectedLeads}
-        onClose={() => {
-          setShowLeadModal(false);
-          setSelectedLeads([]);
-        }}
-        onConfirm={handleConfirmLeads}
-      />
-
-      <DiscardModal
-        open={pendingForMe && pending?.type === 'discard'}
-        pending={pendingForMe && pending?.type === 'discard' ? pending : null}
-        resources={myData?.resources || myData?.gems || {}}
-        onDiscard={handleDiscard}
-      />
-
-      <NobleModal
-        open={pendingForMe && pending?.type === 'witness'}
-        witnesses={pendingWitnesses}
-        onChoose={handleChooseWitness}
-      />
-
+      <BeginnerGuide open={guideOpen} onClose={() => setGuideOpen(false)} />
+      <GemModal open={crosscheckOpen} myData={myData} onClose={() => setCrosscheckOpen(false)} onConfirm={handleCrosscheck} />
+      <DiscardModal open={leadManagerOpen} myData={myData} actionUsed={actionUsed} onClose={() => setLeadManagerOpen(false)} onToggleLead={handleToggleLead} />
+      <NobleModal open={!!witnessModal} witness={witnessModal} myData={myData || {}} onClose={() => setWitnessModal(null)} onConfirm={handleInterrogate} />
       <OpponentModal open={!!opponent} player={opponent} onClose={() => setOpponent(null)} />
-
-      <AccuseModal open={showAccuse} myData={myData} onClose={() => setShowAccuse(false)} onSubmit={handleAccuse} />
-
+      <AccuseModal open={showAccuse} myData={myData || {}} roomData={roomData} onClose={() => setShowAccuse(false)} onSubmit={handleAccuse} />
       <ToastStack items={toasts} />
     </div>
   );

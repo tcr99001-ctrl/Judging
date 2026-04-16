@@ -1,82 +1,13 @@
-import {
-  ACCUSATION_THRESHOLD,
-  ALL,
-  COLORS,
-  GEM_LABEL,
-  GEM_SHORT,
-  LOG_LIMIT,
-  MAX_GEMS,
-  MAX_RESERVED,
-  STALE_PLAYER_MS,
-} from './constants';
-import {
-  METHODS,
-  MOTIVES,
-  SUSPECTS,
-  getCandidateName,
-} from './caseData';
+import { ACCUSATION_THRESHOLD, COLORS, LOG_LIMIT, MAX_RESERVED, STALE_PLAYER_MS } from './constants';
+import { METHODS, MOTIVES, SUSPECTS, getCandidateName } from './caseData';
+
+export function deepClone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
 
 export const vibrate = () => {
   if (typeof navigator !== 'undefined' && navigator.vibrate) navigator.vibrate(15);
 };
-
-export const createEmptyResources = () => ({
-  white: 0,
-  blue: 0,
-  green: 0,
-  red: 0,
-  black: 0,
-  gold: 0,
-});
-
-export const createEmptyGems = createEmptyResources;
-
-export const createEmptyInsights = () => ({
-  white: 0,
-  blue: 0,
-  green: 0,
-  red: 0,
-  black: 0,
-});
-
-export const createEmptyBonuses = createEmptyInsights;
-
-export const createEmptyNotebook = () => ({
-  eliminatedSuspects: [],
-  eliminatedMotives: [],
-  eliminatedMethods: [],
-  notes: [],
-});
-
-export function normalizeResources(resources = {}) {
-  const next = createEmptyResources();
-  for (const color of ALL) next[color] = Number(resources?.[color] || 0);
-  return next;
-}
-
-export function normalizeInsights(insights = {}, clues = null) {
-  if (Array.isArray(clues) && clues.length) return deriveInsightsFromClues(clues);
-  const next = createEmptyInsights();
-  for (const color of COLORS) next[color] = Number(insights?.[color] || 0);
-  return next;
-}
-
-export const normalizeBonuses = normalizeInsights;
-
-export function deriveInsightsFromClues(clues = []) {
-  const next = createEmptyInsights();
-  for (const clue of clues) {
-    const color = clue?.insight || clue?.bonus;
-    if (COLORS.includes(color)) next[color] += 1;
-  }
-  return next;
-}
-
-export function getPlayerInsights(player = {}) {
-  return normalizeInsights(player?.insights || player?.bonuses, player?.clues || player?.cards);
-}
-
-export const getPlayerBonuses = getPlayerInsights;
 
 export function toMillis(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -88,35 +19,10 @@ export function toMillis(value) {
   return 0;
 }
 
-export function getTotalResources(resources) {
-  if (!resources) return 0;
-  return Object.values(resources).reduce((sum, value) => sum + (Number(value) || 0), 0);
-}
-
-export const getTotalGems = getTotalResources;
-
 export function isPlayerStaleFromPresence({ player, roomPresenceAt, staleMs = STALE_PLAYER_MS }) {
   const lastSeenAt = toMillis(player?.lastSeenAt || 0);
   if (!(roomPresenceAt > 0) || !(lastSeenAt > 0)) return false;
   return (roomPresenceAt - lastSeenAt) > staleMs;
-}
-
-export function perColorBank(playerCount) {
-  if (playerCount <= 2) return 4;
-  if (playerCount === 3) return 5;
-  return 7;
-}
-
-export function createBankForPlayers(playerCount) {
-  const per = perColorBank(playerCount);
-  return {
-    white: per,
-    blue: per,
-    green: per,
-    red: per,
-    black: per,
-    gold: 5,
-  };
 }
 
 export function getDisplayName(player) {
@@ -133,15 +39,36 @@ export function hasRealCardPayload(list) {
   return Array.isArray(list) && list.some((item) => item && typeof item === 'object' && typeof item.id === 'string' && !item.placeholder);
 }
 
-export function getOrderedColorEntries(map = {}, { includeGold = false } = {}) {
-  const order = includeGold ? [...COLORS, 'gold'] : COLORS;
-  return order.map((color) => [color, Number(map?.[color] || 0)]).filter(([, value]) => value > 0);
+export function createEmptyNotebook() {
+  return {
+    eliminatedSuspects: [],
+    eliminatedMotives: [],
+    eliminatedMethods: [],
+    notes: [],
+  };
 }
 
-export function formatResourceList(cost = {}, { includeGold = false } = {}) {
-  return getOrderedColorEntries(cost, { includeGold })
-    .map(([color, value]) => `${GEM_SHORT[color]} ${value}`)
-    .join(' · ');
+export function createEmptyLineProfile() {
+  return {
+    white: 0,
+    blue: 0,
+    green: 0,
+    red: 0,
+    black: 0,
+  };
+}
+
+export function countLineProfile(clues = []) {
+  const next = createEmptyLineProfile();
+  for (const clue of clues) {
+    const line = clue?.line;
+    if (COLORS.includes(line)) next[line] += 1;
+  }
+  return next;
+}
+
+export function pushLog(log = [], entry) {
+  return [...(Array.isArray(log) ? log : []), entry].slice(-LOG_LIMIT);
 }
 
 export function formatCandidateList(kind, ids = []) {
@@ -156,6 +83,10 @@ export function summarizeNotebookEffect(effect = {}) {
   return lines;
 }
 
+function dedupe(list = []) {
+  return [...new Set(list.filter(Boolean))];
+}
+
 export function cloneNotebook(notebook = null) {
   return {
     eliminatedSuspects: [...(notebook?.eliminatedSuspects || [])],
@@ -165,222 +96,191 @@ export function cloneNotebook(notebook = null) {
   };
 }
 
-export function pushNotebookNote(notebook, note) {
-  const next = cloneNotebook(notebook);
-  if (note) {
-    next.notes = [...next.notes, note].slice(-10);
-  }
-  return next;
-}
-
 export function applyNotebookEffect(notebook = null, effect = {}, note = '') {
   const next = cloneNotebook(notebook);
-  next.eliminatedSuspects = uniqueIds([...next.eliminatedSuspects, ...(effect?.eliminateSuspects || [])]);
-  next.eliminatedMotives = uniqueIds([...next.eliminatedMotives, ...(effect?.eliminateMotives || [])]);
-  next.eliminatedMethods = uniqueIds([...next.eliminatedMethods, ...(effect?.eliminateMethods || [])]);
-  if (note) next.notes = [...next.notes, note].slice(-10);
+  next.eliminatedSuspects = dedupe([...next.eliminatedSuspects, ...(effect?.eliminateSuspects || [])]);
+  next.eliminatedMotives = dedupe([...next.eliminatedMotives, ...(effect?.eliminateMotives || [])]);
+  next.eliminatedMethods = dedupe([...next.eliminatedMethods, ...(effect?.eliminateMethods || [])]);
+  if (note) next.notes = [...next.notes, note].slice(-12);
   return next;
 }
 
-export function uniqueIds(items = []) {
-  return [...new Set(items.filter(Boolean))];
-}
-
-export function getRemainingSuspectIds(notebook = {}) {
-  return SUSPECTS.map((item) => item.id).filter((id) => !new Set(notebook?.eliminatedSuspects || []).has(id));
-}
-
-export function getRemainingMotiveIds(notebook = {}) {
-  return MOTIVES.map((item) => item.id).filter((id) => !new Set(notebook?.eliminatedMotives || []).has(id));
-}
-
-export function getRemainingMethodIds(notebook = {}) {
-  return METHODS.map((item) => item.id).filter((id) => !new Set(notebook?.eliminatedMethods || []).has(id));
-}
-
-export function buildNotebookSnapshot(notebook = {}) {
+export function buildNotebookSnapshot(notebook = null) {
+  const safe = cloneNotebook(notebook);
+  const remainingSuspects = SUSPECTS.map((entry) => entry.id).filter((id) => !safe.eliminatedSuspects.includes(id));
+  const remainingMotives = MOTIVES.map((entry) => entry.id).filter((id) => !safe.eliminatedMotives.includes(id));
+  const remainingMethods = METHODS.map((entry) => entry.id).filter((id) => !safe.eliminatedMethods.includes(id));
   return {
-    remainingSuspects: getRemainingSuspectIds(notebook),
-    remainingMotives: getRemainingMotiveIds(notebook),
-    remainingMethods: getRemainingMethodIds(notebook),
-    notes: [...(notebook?.notes || [])],
+    ...safe,
+    remainingSuspects,
+    remainingMotives,
+    remainingMethods,
+    eliminatedTotal: safe.eliminatedSuspects.length + safe.eliminatedMotives.length + safe.eliminatedMethods.length,
   };
 }
 
-export function canTakeLeadSelection(selected = [], bank = {}) {
-  const picks = Array.isArray(selected) ? selected.filter((item) => COLORS.includes(item)) : [];
-  if (!picks.length) return { ok: false, reason: '최소 한 개는 골라야 해.' };
-  if (picks.length > 3) return { ok: false, reason: '세 개까지만 가능해.' };
-
-  const counts = {};
-  for (const color of picks) {
-    counts[color] = (counts[color] || 0) + 1;
-  }
-
-  for (const [color, count] of Object.entries(counts)) {
-    if ((bank?.[color] || 0) < count) return { ok: false, reason: `${GEM_LABEL[color]}이 부족해.` };
-  }
-
-  const distinct = Object.keys(counts).length;
-  const maxSame = Math.max(...Object.values(counts));
-
-  if (maxSame === 2) {
-    const color = Object.keys(counts).find((entry) => counts[entry] === 2);
-    if (distinct !== 1) return { ok: false, reason: '같은 색 두 개를 가져가려면 그것만 선택해야 해.' };
-    if ((bank?.[color] || 0) < 4) return { ok: false, reason: '같은 색 두 개는 은행에 네 개 이상 있을 때만 가능해.' };
-    return { ok: true };
-  }
-
-  if (maxSame > 2) return { ok: false, reason: '같은 색을 세 개는 못 가져가.' };
-  if (distinct !== picks.length) return { ok: false, reason: '서로 다른 자원 세 개까지 가능해.' };
-  return { ok: true };
+export function getRemainingSuspectIds(notebook = null) {
+  return buildNotebookSnapshot(notebook).remainingSuspects;
 }
 
-export const isValidTake = canTakeLeadSelection;
-
-export function enumerateLeadSelections(bank = {}) {
-  const out = [];
-  for (const color of COLORS) {
-    if ((bank[color] || 0) >= 4) out.push([color, color]);
-  }
-  const available = COLORS.filter((color) => (bank[color] || 0) > 0);
-  for (let i = 0; i < available.length; i += 1) {
-    out.push([available[i]]);
-    for (let j = i + 1; j < available.length; j += 1) {
-      out.push([available[i], available[j]]);
-      for (let k = j + 1; k < available.length; k += 1) {
-        out.push([available[i], available[j], available[k]]);
-      }
-    }
-  }
-  return out.filter((selection) => canTakeLeadSelection(selection, bank).ok);
+export function getRemainingMotiveIds(notebook = null) {
+  return buildNotebookSnapshot(notebook).remainingMotives;
 }
 
-export function getAffordableState(card, player) {
-  const resources = normalizeResources(player?.resources || player?.gems);
-  const insights = getPlayerInsights(player);
-  const cost = card?.cost || {};
-  let goldNeed = 0;
-  const missing = {};
-  const effective = {};
-
-  for (const color of COLORS) {
-    const need = Math.max(0, Number(cost[color] || 0) - Number(insights[color] || 0));
-    effective[color] = need;
-    const own = Number(resources[color] || 0);
-    const shortage = Math.max(0, need - own);
-    missing[color] = shortage;
-    goldNeed += shortage;
-  }
-
-  const canAfford = goldNeed <= Number(resources.gold || 0);
-  return { canAfford, missing, effective, goldNeed };
-}
-
-export function canSecureClue(card, player) {
-  return getAffordableState(card, player).canAfford;
-}
-
-export const canBuy = canSecureClue;
-
-export function computeCluePayment(card, player) {
-  const resources = normalizeResources(player?.resources || player?.gems);
-  const insights = getPlayerInsights(player);
-  const cost = card?.cost || {};
-  const payment = createEmptyResources();
-
-  for (const color of COLORS) {
-    const need = Math.max(0, Number(cost[color] || 0) - Number(insights[color] || 0));
-    const spend = Math.min(need, Number(resources[color] || 0));
-    payment[color] = spend;
-    const remain = need - spend;
-    if (remain > 0) payment.gold += remain;
-  }
-
-  return payment;
-}
-
-export const computePayment = computeCluePayment;
-
-export function getClueAcquireDisplay(card, player) {
-  const affordable = getAffordableState(card, player);
-  const missingLines = getOrderedColorEntries(affordable.missing)
-    .map(([color, value]) => `${GEM_LABEL[color]} ${value}`);
-  return {
-    ...affordable,
-    missingText: missingLines.length ? missingLines.join(', ') : '없음',
-  };
-}
-
-export function eligibleWitnesses(insights = {}, witnessStrip = []) {
-  return (witnessStrip || []).filter((witness) => COLORS.every((color) => Number(insights?.[color] || 0) >= Number(witness?.req?.[color] || 0)));
-}
-
-export function countBreakthroughs(player = {}) {
-  if (Number.isFinite(player?.breakthroughs)) return Number(player.breakthroughs || 0);
-  return (player?.clues || player?.cards || []).filter((item) => Number(item?.tier || 0) >= 3).length + (player?.witnesses || player?.nobles || []).length;
-}
-
-export function hasAnyLegalAction({ player, board, decks, bank }) {
-  if (!player) return false;
-  if (enumerateLeadSelections(bank).length) return true;
-
-  const visible = [...(board?.[1] || []), ...(board?.[2] || []), ...(board?.[3] || [])];
-  if (visible.some((card) => canSecureClue(card, player))) return true;
-  if ((player?.reservedLeads || player?.reserved || []).some((card) => canSecureClue(card, player))) return true;
-
-  const reservedCount = Number(player?.reservedCount || (player?.reservedLeads || player?.reserved || []).length || 0);
-  if (reservedCount < MAX_RESERVED) {
-    if (visible.length) return true;
-    if ([1, 2, 3].some((tier) => Number(decks?.[tier]?.length || 0) > 0)) return true;
-  }
-
-  return false;
-}
-
-export function canAccuse(player = {}) {
-  return !player?.accusationLocked && Number(player?.caseProgress ?? player?.score ?? 0) >= ACCUSATION_THRESHOLD;
-}
-
-export function comparePlayersForVictory(a, b) {
-  const progressDiff = Number(b?.caseProgress ?? b?.score ?? 0) - Number(a?.caseProgress ?? a?.score ?? 0);
-  if (progressDiff !== 0) return progressDiff;
-
-  const breakthroughDiff = countBreakthroughs(b) - countBreakthroughs(a);
-  if (breakthroughDiff !== 0) return breakthroughDiff;
-
-  const clueDiff = Number((b?.clues || b?.cards || []).length || 0) - Number((a?.clues || a?.cards || []).length || 0);
-  if (clueDiff !== 0) return clueDiff;
-
-  return Number(a?.turnsTaken || 0) - Number(b?.turnsTaken || 0);
-}
-
-export function pushLog(log = [], entry = {}) {
-  const next = [...(Array.isArray(log) ? log : []), entry];
-  return next.length > LOG_LIMIT ? next.slice(-LOG_LIMIT) : next;
+export function getRemainingMethodIds(notebook = null) {
+  return buildNotebookSnapshot(notebook).remainingMethods;
 }
 
 export function resolveCaseProgress(player = {}) {
-  return Number(player?.caseProgress ?? player?.score ?? 0);
+  return Number(player?.caseProgress || 0);
 }
 
-export function describeAccusationChoice({ culpritId, motiveId, methodId }) {
-  return `${getCandidateName('suspect', culpritId)} / ${getCandidateName('motive', motiveId)} / ${getCandidateName('method', methodId)}`;
+export function countBreakthroughs(player = {}) {
+  return Number(player?.breakthroughs || 0);
 }
 
-export function buildPublicNotebookSummary(notebook = {}) {
-  const snapshot = buildNotebookSnapshot(notebook);
+export function pairKey(a, b) {
+  return [String(a || ''), String(b || '')].sort().join('::');
+}
+
+export function getAllKnownClues(player = {}) {
+  const privateClues = Array.isArray(player?.privateClues) ? player.privateClues : [];
+  const reservedLeads = Array.isArray(player?.reservedLeads) ? player.reservedLeads : [];
+  const map = new Map();
+  [...privateClues, ...reservedLeads].forEach((clue) => {
+    if (clue?.id) map.set(clue.id, clue);
+  });
+  return [...map.values()];
+}
+
+export function findClueById(player = {}, clueId) {
+  return getAllKnownClues(player).find((card) => card.id === clueId) || null;
+}
+
+export function isLeadPinned(player = {}, clueId) {
+  return Array.isArray(player?.reservedLeads) && player.reservedLeads.some((card) => card.id === clueId);
+}
+
+export function getSharedThreads(cardA, cardB) {
+  const a = new Set(cardA?.threads || []);
+  const b = new Set(cardB?.threads || []);
+  return [...a].filter((item) => b.has(item));
+}
+
+export function getPinnedThreads(player = {}) {
+  const set = new Set();
+  for (const clue of player?.reservedLeads || []) {
+    for (const thread of clue?.threads || []) set.add(thread);
+  }
+  return set;
+}
+
+export function getLineProfileFromPrivate(player = {}) {
+  return countLineProfile(getAllKnownClues(player));
+}
+
+export function canTakeClue(roomData = {}) {
+  return [1, 2, 3].some((tier) => Array.isArray(roomData?.board?.[tier]) && roomData.board[tier].length > 0);
+}
+
+export function canFileLead(player = {}, clueId = null) {
+  const pinned = Array.isArray(player?.reservedLeads) ? player.reservedLeads : [];
+  if (clueId && isLeadPinned(player, clueId)) return true;
+  if (pinned.length >= MAX_RESERVED) return false;
+  const privateClues = Array.isArray(player?.privateClues) ? player.privateClues : [];
+  const candidates = privateClues.filter((clue) => !isLeadPinned(player, clue.id));
+  if (clueId) return candidates.some((clue) => clue.id === clueId);
+  return candidates.length > 0;
+}
+
+export function canCrosscheck(player = {}, clueIdA = null, clueIdB = null) {
+  const clues = getAllKnownClues(player);
+  if (clues.length < 2) return false;
+  if (!clueIdA || !clueIdB) return true;
+  if (clueIdA === clueIdB) return false;
+  const cardA = clues.find((clue) => clue.id === clueIdA);
+  const cardB = clues.find((clue) => clue.id === clueIdB);
+  if (!cardA || !cardB) return false;
+  if (!getSharedThreads(cardA, cardB).length) return false;
+  const used = new Set(player?.crosscheckPairs || []);
+  return !used.has(pairKey(clueIdA, clueIdB));
+}
+
+export function getAvailableCrosschecks(player = {}) {
+  const clues = getAllKnownClues(player);
+  const used = new Set(player?.crosscheckPairs || []);
+  const out = [];
+  for (let i = 0; i < clues.length; i += 1) {
+    for (let j = i + 1; j < clues.length; j += 1) {
+      const sharedThreads = getSharedThreads(clues[i], clues[j]);
+      if (!sharedThreads.length) continue;
+      const key = pairKey(clues[i].id, clues[j].id);
+      if (used.has(key)) continue;
+      out.push({ a: clues[i], b: clues[j], key, sharedThreads });
+    }
+  }
+  return out;
+}
+
+export function canInterrogate(player = {}, witness = null) {
+  if (!witness) return false;
+  const used = new Set(player?.interrogatedWitnessIds || []);
+  if (used.has(witness.id)) return false;
+  const pinnedThreads = getPinnedThreads(player);
+  const requiredThreads = witness?.needs?.threads || [];
+  const enoughThreads = requiredThreads.every((thread) => pinnedThreads.has(thread));
+  const crosschecks = Array.isArray(player?.crosscheckPairs) ? player.crosscheckPairs.length : 0;
+  const enoughCrosschecks = crosschecks >= Number(witness?.needs?.crosschecks || 0);
+  return enoughThreads && enoughCrosschecks;
+}
+
+export function witnessUnlockState(player = {}, witness = null) {
+  const pinnedThreads = getPinnedThreads(player);
+  const requiredThreads = witness?.needs?.threads || [];
+  const missingThreads = requiredThreads.filter((thread) => !pinnedThreads.has(thread));
+  const crosschecks = Array.isArray(player?.crosscheckPairs) ? player.crosscheckPairs.length : 0;
+  const needCrosschecks = Math.max(0, Number(witness?.needs?.crosschecks || 0) - crosschecks);
   return {
-    suspects: snapshot.remainingSuspects.length,
-    motives: snapshot.remainingMotives.length,
-    methods: snapshot.remainingMethods.length,
+    ready: missingThreads.length === 0 && needCrosschecks === 0 && !((player?.interrogatedWitnessIds || []).includes(witness?.id)),
+    missingThreads,
+    needCrosschecks,
   };
 }
 
-export function getStrongestInsightColor(insights = {}) {
-  return COLORS.reduce((best, color) => {
-    const value = Number(insights?.[color] || 0);
-    if (!best || value > best.value) return { color, value };
-    return best;
-  }, null);
+export function canAccuse(player = {}, roomData = {}) {
+  if (player?.accusationLocked) return false;
+  const threshold = Number(roomData?.accusationThreshold || ACCUSATION_THRESHOLD);
+  const progressOk = Number(player?.caseProgress || 0) >= threshold;
+  const snapshot = buildNotebookSnapshot(player?.notebook || {});
+  const narrowed = snapshot.remainingSuspects.length <= 2 && snapshot.remainingMotives.length <= 2 && snapshot.remainingMethods.length <= 2;
+  return progressOk || narrowed;
+}
+
+export function hasAnyLegalAction({ player = {}, roomData = {} }) {
+  if (canTakeClue(roomData)) return true;
+  if (canFileLead(player)) return true;
+  if (canCrosscheck(player)) return true;
+  if ((roomData?.witnessStrip || []).some((witness) => canInterrogate(player, witness))) return true;
+  if (canAccuse(player, roomData)) return true;
+  return false;
+}
+
+export function describeAccusationChoice(choice = {}) {
+  if (!choice) return '';
+  return `${getCandidateName('suspect', choice.culpritId)} / ${getCandidateName('motive', choice.motiveId)} / ${getCandidateName('method', choice.methodId)}`;
+}
+
+export function totalCandidateEliminations(notebook = null) {
+  const snap = buildNotebookSnapshot(notebook);
+  return snap.eliminatedTotal;
+}
+
+export function comparePlayersForVictory(a = {}, b = {}) {
+  const progressDiff = Number(b.caseProgress || 0) - Number(a.caseProgress || 0);
+  if (progressDiff !== 0) return progressDiff;
+  const eliminationDiff = totalCandidateEliminations(b.notebook) - totalCandidateEliminations(a.notebook);
+  if (eliminationDiff !== 0) return eliminationDiff;
+  const witnessDiff = Number(b.witnessCount || 0) - Number(a.witnessCount || 0);
+  if (witnessDiff !== 0) return witnessDiff;
+  return Number(a.turnsTaken || 0) - Number(b.turnsTaken || 0);
 }

@@ -2,107 +2,82 @@
 
 import React from 'react';
 import AssetImage from './AssetImage';
-import GemAsset from './GemAsset';
-import { useFX } from '../fx/FXProvider';
 import { CARD_MARK_ASSET, TIER_EMBLEM_ASSET } from '../shared/assets';
-import { COLORS, GEM_LABEL, TIER_LABEL, TIER_THEME } from '../shared/constants';
-import { summarizeNotebookEffect } from '../shared/utils';
+import { GEM_LABEL, TIER_LABEL } from '../shared/constants';
 
-function CostRow({ cost = {} }) {
-  const entries = COLORS.filter((color) => Number(cost?.[color] || 0) > 0);
+const TIER_FRAME = {
+  1: 'border-slate-300/80 bg-[radial-gradient(circle_at_top_left,_rgba(255,255,255,0.96),_rgba(226,232,240,0.94))] text-slate-900',
+  2: 'border-sky-200/80 bg-[radial-gradient(circle_at_top_left,_rgba(239,246,255,0.98),_rgba(224,242,254,0.95))] text-slate-900',
+  3: 'border-violet-200/80 bg-[radial-gradient(circle_at_top_left,_rgba(250,245,255,0.98),_rgba(243,232,255,0.95))] text-slate-900',
+};
 
-  return (
-    <div className="mt-3 flex flex-wrap gap-1.5">
-      {entries.length ? entries.map((color) => (
-        <span key={color} className="inline-flex items-center gap-1 rounded-full border border-black/10 bg-black/85 px-2 py-1 text-[11px] font-black text-white">
-          <GemAsset color={color} className="h-3.5 w-3.5" />
-          {cost[color]}
-        </span>
-      )) : <span className="text-[11px] font-black text-slate-500">비용 없음</span>}
-    </div>
-  );
-}
+const LINE_TONE = {
+  white: 'bg-slate-100 text-slate-700 border-slate-300',
+  blue: 'bg-sky-100 text-sky-700 border-sky-300',
+  green: 'bg-emerald-100 text-emerald-700 border-emerald-300',
+  red: 'bg-rose-100 text-rose-700 border-rose-300',
+  black: 'bg-slate-800 text-slate-100 border-slate-950',
+};
 
 export default function CardFace({
   card,
-  compact = false,
-  selected = false,
-  onClick,
-  sourceLabel = null,
+  size = 'board',
   className = '',
+  emphasis = false,
 }) {
-  const fx = useFX();
   if (!card) return null;
 
-  const theme = TIER_THEME[card.tier] || TIER_THEME[1];
-  const effectLines = card.effectLines?.length ? card.effectLines : summarizeNotebookEffect(card.effect);
+  const compact = size === 'mini';
+  const directiveCount = (card.directives?.eliminateSuspects?.length || 0)
+    + (card.directives?.eliminateMotives?.length || 0)
+    + (card.directives?.eliminateMethods?.length || 0);
 
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      ref={fx?.anchorRef?.(`card:${card.id}`)}
-      data-selected={selected ? 'true' : 'false'}
+    <div
       className={[
-        'market-card tap-feedback motion-card-enter relative overflow-hidden rounded-[1.35rem] border text-left text-slate-900',
-        theme.frame,
-        selected ? `ring-2 ${theme.glow}` : '',
-        compact ? 'min-h-[188px] p-3.5' : 'min-h-[212px] p-4',
+        'relative flex h-full min-h-[182px] flex-col overflow-hidden rounded-[24px] border shadow-[0_16px_36px_rgba(15,23,42,0.18)]',
+        TIER_FRAME[card.tier] || TIER_FRAME[1],
+        compact ? 'min-h-[128px] rounded-[20px]' : '',
+        emphasis ? 'ring-2 ring-amber-300/70' : '',
         className,
       ].join(' ')}
     >
-      <div className="card-noise absolute inset-0" />
-      <div className="relative z-[1] flex h-full flex-col">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <div className={`inline-flex items-center rounded-full border px-2 py-1 text-[10px] font-black ${theme.badge}`}>
-              {TIER_LABEL[card.tier]}
-            </div>
-            <div className={`mt-2 line-clamp-2 font-black text-slate-900 ${compact ? 'text-sm' : 'text-base'}`}>{card.title}</div>
-            {card.subtitle ? <div className="mt-1 line-clamp-2 text-xs font-bold text-slate-600">{card.subtitle}</div> : null}
-          </div>
+      <div className="pointer-events-none absolute inset-0 opacity-10">
+        <AssetImage src={CARD_MARK_ASSET[card.mark]} className="absolute -right-6 top-5 h-24 w-24 rotate-[12deg]" />
+      </div>
 
-          <div className="flex shrink-0 flex-col items-end gap-2">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-black/10 bg-white/70 p-2">
-              <AssetImage src={CARD_MARK_ASSET[card.mark]} className="h-full w-full" decorative />
-            </div>
-            <div className="flex h-8 w-8 items-center justify-center rounded-full border border-black/10 bg-white/70 p-1.5">
-              <AssetImage src={TIER_EMBLEM_ASSET[card.tier]} className="h-full w-full" decorative />
-            </div>
-          </div>
+      <div className="relative flex items-start justify-between gap-3 px-3.5 pb-2 pt-3.5">
+        <div className="min-w-0">
+          <div className="text-[10px] font-black tracking-[0.22em] text-slate-500">{TIER_LABEL[card.tier]}</div>
+          <div className={[compact ? 'mt-1 text-sm' : 'mt-1.5 text-[15px]', 'line-clamp-2 font-black leading-snug'].join(' ')}>{card.title}</div>
         </div>
+        <AssetImage src={TIER_EMBLEM_ASSET[card.tier]} className={compact ? 'h-8 w-8 shrink-0' : 'h-9 w-9 shrink-0'} />
+      </div>
 
-        <div className="mt-3 flex items-start gap-2">
-          <div className="rounded-2xl border border-black/8 bg-white/72 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
-            <div className="text-[10px] font-black tracking-[0.16em] text-slate-500">진척</div>
-            <div className="mt-1 text-base font-black text-slate-900">+{card.progress || 0}</div>
-          </div>
-          <div className="min-w-0 flex-1 rounded-2xl border border-black/8 bg-white/72 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
-            <div className="text-[10px] font-black tracking-[0.16em] text-slate-500">통찰</div>
-            <div className="mt-1 flex items-center gap-2 text-sm font-black text-slate-900">
-              <GemAsset color={card.insight || card.bonus} className="h-4.5 w-4.5" />
-              <span className="truncate">{GEM_LABEL[card.insight || card.bonus]}</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-3 rounded-2xl border border-black/8 bg-white/72 px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
-          <div className="line-clamp-3 text-xs font-bold leading-5 text-slate-700">{card.detail}</div>
-          {effectLines?.length ? (
-            <div className="mt-2 line-clamp-2 rounded-2xl border border-amber-300/45 bg-amber-50/90 px-3 py-2 text-[11px] font-black text-amber-900">
-              {effectLines[0]}
-            </div>
+      <div className="relative flex flex-1 flex-col px-3.5 pb-3.5">
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          <span className={`rounded-full border px-2 py-1 text-[10px] font-black ${LINE_TONE[card.line] || LINE_TONE.white}`}>
+            {GEM_LABEL[card.line]}
+          </span>
+          {directiveCount ? (
+            <span className="rounded-full border border-amber-300 bg-amber-100 px-2 py-1 text-[10px] font-black text-amber-700">
+              제거 {directiveCount}
+            </span>
           ) : null}
         </div>
 
+        <p className={[compact ? 'text-[11px]' : 'text-[12px]', 'line-clamp-3 font-bold leading-5 text-slate-700'].join(' ')}>{card.summary}</p>
+
         <div className="mt-auto pt-3">
-          {sourceLabel ? <div className="mb-1 text-[10px] font-black tracking-[0.16em] text-slate-500">{sourceLabel}</div> : null}
-          <div className="rounded-2xl border border-black/8 bg-slate-900/88 px-3 py-2 shadow-[0_10px_18px_rgba(15,23,42,0.2)]">
-            <div className="text-[10px] font-black tracking-[0.16em] text-slate-400">확보 비용</div>
-            <CostRow cost={card.cost} />
+          <div className="flex flex-wrap gap-1.5">
+            {(card.threads || []).slice(0, compact ? 2 : 3).map((thread) => (
+              <span key={thread} className="rounded-full border border-slate-300/80 bg-white/80 px-2 py-1 text-[10px] font-black text-slate-600">
+                {thread}
+              </span>
+            ))}
           </div>
         </div>
       </div>
-    </button>
+    </div>
   );
 }

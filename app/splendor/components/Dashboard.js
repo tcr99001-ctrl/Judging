@@ -1,108 +1,121 @@
 'use client';
 
-import React, { memo } from 'react';
-import { AlertTriangle, Archive, Gavel, Search, Send } from 'lucide-react';
+import React, { useMemo } from 'react';
+import { AlertTriangle, BookMarked, Crosshair, Gavel, Pin, SkipForward } from 'lucide-react';
 import GemAsset from './GemAsset';
-import { useFX } from '../fx/FXProvider';
-import { ALL, GEM_LABEL } from '../shared/constants';
-import { canAccuse, getDisplayName, getTotalResources, resolveCaseProgress } from '../shared/utils';
+import { COLORS, GEM_LABEL } from '../shared/constants';
+import { buildNotebookSnapshot, canAccuse } from '../shared/utils';
 
-function ResourcePill({ color, value, anchorRef }) {
+function StatCard({ label, value }) {
   return (
-    <div ref={anchorRef} className="rounded-2xl border border-white/10 bg-slate-950/55 px-2.5 py-2">
-      <div className="flex items-center gap-1.5">
-        <GemAsset color={color} className="h-4.5 w-4.5" />
-        <span className="text-[11px] font-black text-slate-300">{GEM_LABEL[color]}</span>
-      </div>
-      <div className="mt-1 text-sm font-black text-white">{value}</div>
+    <div className="rounded-2xl border border-white/10 bg-slate-950/54 px-3 py-3">
+      <div className="text-[10px] font-black tracking-[0.16em] text-slate-400">{label}</div>
+      <div className="mt-1 text-lg font-black text-white">{value}</div>
     </div>
   );
 }
 
-function DashboardImpl({
+function ActionButton({ icon: Icon, label, disabled, onClick, tone = 'default' }) {
+  const toneClass = tone === 'danger'
+    ? 'border-rose-300/30 bg-rose-500/14 text-rose-50'
+    : tone === 'primary'
+      ? 'border-amber-300/30 bg-amber-500/14 text-amber-50'
+      : 'border-white/10 bg-slate-950/54 text-slate-100';
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`tap-feedback min-h-12 rounded-2xl border px-4 py-3 text-sm font-black disabled:border-slate-800 disabled:bg-slate-950 disabled:text-slate-500 ${toneClass}`}
+    >
+      <span className="inline-flex items-center gap-2"><Icon size={15} /> {label}</span>
+    </button>
+  );
+}
+
+export default function Dashboard({
   myData,
   roomData,
   isMyTurn,
-  lockUsed,
-  pendingForMe,
-  onOpenLeadModal,
+  actionUsed,
+  canForceStaleSkip,
+  onOpenLeadManager,
+  onOpenCrosscheck,
   onOpenAccuse,
   onEndTurn,
+  onForceStaleSkip,
 }) {
-  const fx = useFX();
-  const resources = myData?.resources || myData?.gems || {};
-  const reservedCount = myData?.reservedCount || (myData?.reservedLeads || myData?.reserved || []).length || 0;
-  const accuseReady = canAccuse(myData || {});
-  const currentId = roomData?.turnOrder?.[roomData?.turnIndex] || null;
-  const currentPlayer = currentId ? roomData?.turnOrder?.includes(currentId) : false;
-
-  let statusText = '대기 중';
-  if (pendingForMe && roomData?.pending?.type === 'discard') statusText = '자원 정리';
-  else if (pendingForMe && roomData?.pending?.type === 'witness') statusText = '추궁 선택';
-  else if (isMyTurn && lockUsed) statusText = '턴 종료 대기';
-  else if (isMyTurn) statusText = '내 차례';
-  else statusText = '상대 차례';
+  const snapshot = useMemo(() => buildNotebookSnapshot(myData?.notebook || {}), [myData?.notebook]);
+  const accuseReady = canAccuse(myData || {}, roomData || {});
 
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 px-3 pb-[calc(var(--safe-bottom)+12px)]">
-      <div className="mx-auto max-w-[480px]">
-        <div className="panel pointer-events-auto overflow-hidden border-white/12 bg-slate-950/80 backdrop-blur-md">
-          <div className="grid gap-3 px-3 py-3">
-            <div className="flex items-center gap-2">
-              <div ref={fx?.anchorRef?.(`hud:${myData?.id || 'ME'}`)} className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-white/5 px-3 py-2">
-                <div className="truncate text-sm font-black text-white">{getDisplayName(myData)}</div>
-                <div className="mt-1 text-[11px] font-bold text-slate-400">{statusText}</div>
-              </div>
-              <div ref={fx?.anchorRef?.(`hudScore:${myData?.id || 'ME'}`)} className="rounded-2xl border border-amber-300/25 bg-amber-500/12 px-3 py-2 text-center">
-                <div className="text-[11px] font-black tracking-[0.16em] text-amber-100">진척</div>
-                <div className="mt-1 text-lg font-black text-white">{resolveCaseProgress(myData || {})}</div>
-              </div>
-            </div>
+    <div className="fixed inset-x-0 bottom-0 z-20">
+      <div className="mx-auto w-full max-w-[480px] px-3 pb-[calc(0.75rem+var(--safe-bottom))]">
+        <section className="panel overflow-hidden border-white/15 bg-[linear-gradient(180deg,rgba(15,23,42,0.98),rgba(2,6,23,0.96))] p-3">
+          <div className="grid grid-cols-4 gap-2">
+            <StatCard label="단서" value={myData?.clueCount || 0} />
+            <StatCard label="리드" value={myData?.reservedLeads?.length || 0} />
+            <StatCard label="대조" value={myData?.crosscheckPairs?.length || 0} />
+            <StatCard label="추궁" value={myData?.witnessCount || 0} />
+          </div>
 
-            <div ref={fx?.anchorRef?.('bank:center')} className="grid grid-cols-3 gap-2 sm:grid-cols-6">
-              {ALL.map((color) => (
-                <ResourcePill key={color} color={color} value={resources?.[color] || 0} anchorRef={fx?.anchorRef?.(`bank:${color}`)} />
+          <div className="mt-3 rounded-3xl border border-white/10 bg-slate-950/48 px-3 py-3">
+            <div className="mb-2 text-[11px] font-black tracking-[0.16em] text-slate-400">내 수첩</div>
+            <div className="grid grid-cols-3 gap-2">
+              <StatCard label="용의자" value={snapshot.remainingSuspects.length} />
+              <StatCard label="동기" value={snapshot.remainingMotives.length} />
+              <StatCard label="수법" value={snapshot.remainingMethods.length} />
+            </div>
+            <div className="mt-3 grid grid-cols-5 gap-2">
+              {COLORS.map((color) => (
+                <div key={color} className="rounded-2xl border border-white/8 bg-white/5 px-2 py-2 text-center">
+                  <div className="mx-auto flex h-7 w-7 items-center justify-center rounded-full bg-slate-950/60">
+                    <GemAsset color={color} className="h-4 w-4" />
+                  </div>
+                  <div className="mt-1 text-[10px] font-black text-slate-200">{GEM_LABEL[color]}</div>
+                  <div className="mt-0.5 text-xs font-black text-white">{myData?.lineProfile?.[color] || 0}</div>
+                </div>
               ))}
             </div>
-
-            <div className="grid grid-cols-3 gap-2 text-[11px] font-black text-slate-300">
-              <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-center">단서 {(myData?.clues || myData?.cards || []).length}</div>
-              <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-center">리드 {reservedCount}</div>
-              <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-center">추궁 {(myData?.witnesses || myData?.nobles || []).length}</div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={onOpenLeadModal}
-                disabled={!isMyTurn || lockUsed || !!pendingForMe}
-                className="tap-feedback min-h-12 rounded-2xl border border-sky-300/25 bg-sky-500/12 px-3 py-3 text-sm font-black text-sky-50 disabled:border-slate-800 disabled:bg-slate-950 disabled:text-slate-500"
-              >
-                <span className="inline-flex items-center gap-2"><Search size={15} /> 자원</span>
-              </button>
-              <button
-                type="button"
-                onClick={onOpenAccuse}
-                disabled={!accuseReady || !!pendingForMe}
-                className="tap-feedback min-h-12 rounded-2xl border border-rose-300/25 bg-rose-500/12 px-3 py-3 text-sm font-black text-rose-50 disabled:border-slate-800 disabled:bg-slate-950 disabled:text-slate-500"
-              >
-                <span className="inline-flex items-center gap-2"><Gavel size={15} /> 고발</span>
-              </button>
-              <button
-                type="button"
-                onClick={onEndTurn}
-                disabled={!isMyTurn || !!pendingForMe}
-                className="tap-feedback min-h-12 rounded-2xl border border-amber-300/25 bg-amber-500/12 px-3 py-3 text-sm font-black text-amber-50 disabled:border-slate-800 disabled:bg-slate-950 disabled:text-slate-500"
-              >
-                <span className="inline-flex items-center gap-2"><Send size={15} /> 턴 종료</span>
-              </button>
-            </div>
           </div>
-        </div>
+
+          {snapshot.notes?.length ? (
+            <div className="mt-3 rounded-3xl border border-white/10 bg-slate-950/48 px-3 py-3 text-sm font-bold leading-6 text-slate-200">
+              {snapshot.notes.slice(-2).reverse().map((note) => (
+                <div key={note} className="line-clamp-2">{note}</div>
+              ))}
+            </div>
+          ) : null}
+
+          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <ActionButton icon={Pin} label="정리" disabled={!isMyTurn || actionUsed} onClick={onOpenLeadManager} />
+            <ActionButton icon={Crosshair} label="대조" disabled={!isMyTurn || actionUsed} onClick={onOpenCrosscheck} />
+            <ActionButton icon={Gavel} label="고발" disabled={!isMyTurn || actionUsed || !accuseReady} onClick={onOpenAccuse} tone="danger" />
+            <ActionButton icon={BookMarked} label="종료" disabled={!isMyTurn} onClick={onEndTurn} tone="primary" />
+          </div>
+
+          {canForceStaleSkip ? (
+            <button
+              type="button"
+              onClick={onForceStaleSkip}
+              className="tap-feedback mt-2 flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl border border-rose-300/25 bg-rose-500/12 px-4 py-3 text-sm font-black text-rose-50"
+            >
+              <SkipForward size={15} /> 넘기기
+            </button>
+          ) : null}
+
+          {!isMyTurn ? (
+            <div className="mt-2 flex items-center gap-2 rounded-2xl border border-white/10 bg-slate-950/48 px-4 py-3 text-sm font-bold text-slate-300">
+              <AlertTriangle size={15} className="text-amber-200" /> 지금은 네 차례가 아니다.
+            </div>
+          ) : actionUsed ? (
+            <div className="mt-2 flex items-center gap-2 rounded-2xl border border-white/10 bg-slate-950/48 px-4 py-3 text-sm font-bold text-slate-300">
+              <AlertTriangle size={15} className="text-amber-200" /> 행동은 끝났다. 턴을 넘겨라.
+            </div>
+          ) : null}
+        </section>
       </div>
     </div>
   );
 }
-
-const Dashboard = memo(DashboardImpl);
-export default Dashboard;

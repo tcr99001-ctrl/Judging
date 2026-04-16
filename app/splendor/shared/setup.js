@@ -3,15 +3,7 @@ import { ACCUSATION_THRESHOLD, CASE_TITLE } from './constants';
 import { CASE_BRIEFING, buildReveal, createCaseSeed, drawSolution } from './caseData';
 import { buildCaseDecks } from './cards';
 import { buildWitnessStrip } from './nobles';
-import {
-  createBankForPlayers,
-  createEmptyBonuses,
-  createEmptyGems,
-  createEmptyNotebook,
-  createEmptyResources,
-  createEmptyInsights,
-  makeDeckPlaceholders,
-} from './utils';
+import { createEmptyNotebook, makeDeckPlaceholders } from './utils';
 
 function deepClone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -37,25 +29,16 @@ export function toPublicDecks(hiddenDecks) {
 }
 
 export function createPublicPlayerPayload(name, isBot = false) {
-  const resources = createEmptyResources();
-  const insights = createEmptyInsights();
   return {
     name,
     isBot,
-    caseProgress: 0,
-    score: 0,
-    turnsTaken: 0,
-    resources,
-    gems: createEmptyGems(),
-    insights,
-    bonuses: createEmptyBonuses(),
-    clues: [],
-    cards: [],
-    breakthroughs: 0,
-    accusationLocked: false,
+    clueCount: 0,
     reservedCount: 0,
-    witnesses: [],
-    nobles: [],
+    witnessCount: 0,
+    caseProgress: 0,
+    breakthroughs: 0,
+    turnsTaken: 0,
+    accusationLocked: false,
     online: true,
     lastSeenAt: serverTimestamp(),
   };
@@ -63,14 +46,16 @@ export function createPublicPlayerPayload(name, isBot = false) {
 
 export function createPrivatePlayerPayload() {
   return {
+    privateClues: [],
     reservedLeads: [],
-    reserved: [],
     notebook: createEmptyNotebook(),
     accusationHistory: [],
+    crosscheckPairs: [],
+    interrogatedWitnessIds: [],
   };
 }
 
-export function buildCaseSetup({ seed = createCaseSeed(), playerCount = 2 } = {}) {
+export function buildCaseSetup({ seed = createCaseSeed() } = {}) {
   const solution = drawSolution(seed);
   const hiddenDecks = buildCaseDecks({ solution, seed });
   const board = drawBoardFromDecks(hiddenDecks);
@@ -86,7 +71,6 @@ export function buildCaseSetup({ seed = createCaseSeed(), playerCount = 2 } = {}
       decks: toPublicDecks(hiddenDecks),
       witnessStrip: deepClone(witnessStrip),
       nobles: deepClone(witnessStrip),
-      bank: createBankForPlayers(playerCount),
       reveal: null,
     },
     private: {

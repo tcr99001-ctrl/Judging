@@ -1,1 +1,3 @@
-export { default } from '../hooks/PageInner';
+import PageInner from '../hooks/PageInner';
+
+export default PageInner;
