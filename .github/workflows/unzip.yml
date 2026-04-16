@@ -3,71 +3,102 @@ name: Wipe and Install (Any Zip)
 on:
   push:
     paths:
-      - '*.zip' # 루트 경로에 zip 파일이 올라오면 발동
+      - '**/*.zip'
 
 jobs:
   wipe-and-install:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
 
-      - name: Wipe Old Files & Unzip New (Auto Detect)
+      - name: Wipe Old Files & Unzip New (Robust)
+        shell: bash
         run: |
-          # 1. 현재 경로의 .zip 파일 찾기 (가장 먼저 발견된 것 하나)
-          ZIP_FILE=$(ls *.zip 2>/dev/null | head -n 1)
+          set -euo pipefail
 
-          if [ -n "$ZIP_FILE" ]; then
-            echo "🚨 압축 파일 감지됨: '$ZIP_FILE'"
-            echo "기존 파일 삭제를 시작합니다..."
+          echo "----- find zips (pre) -----"
+          find . -maxdepth 6 -type f -name "*.zip" -print || true
+          echo "---------------------------"
 
-            # 2. 기존 파일 삭제 (.git, .github, 그리고 방금 찾은 zip 파일 제외)
-            # 주의: $ZIP_FILE 변수를 사용하여 해당 zip 파일이 삭제되지 않도록 함
-            find . -maxdepth 1 ! -name '.git' ! -name '.github' ! -name "$ZIP_FILE" ! -name '.' -exec rm -rf {} +
-            echo "🧹 청소 완료."
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.sha }}"
+          ZIP_FILE="$(git diff --name-only "$BEFORE" "$AFTER" | grep -E '\.zip$' | head -n 1 || true)"
 
-            # 3. 임시 폴더에 압축 해제
-            echo "📦 '$ZIP_FILE' 압축 해제 중..."
-            mkdir temp_unzip
-            unzip -q -o "$ZIP_FILE" -d temp_unzip
+          if [ -z "$ZIP_FILE" ]; then
+            ZIP_FILE="$(find . -maxdepth 6 -type f -name "*.zip" | head -n 1 || true)"
+          fi
 
-            # 4. 폴더 구조 평탄화 (Flatten) 로직
-            COUNT=$(ls -1 temp_unzip | wc -l)
-            FIRST_ITEM=$(ls -1 temp_unzip | head -n 1)
-            shopt -s dotglob # 숨김 파일 포함
-
-            if [ "$COUNT" -eq 1 ] && [ -d "temp_unzip/$FIRST_ITEM" ]; then
-              echo "📂 폴더 채로 압축되었군요. 내부 파일을 꺼냅니다..."
-              mv temp_unzip/"$FIRST_ITEM"/* .
-            else
-              echo "📄 파일들이 바로 압축되어 있군요. 그대로 이동합니다..."
-              mv temp_unzip/* .
-            fi
-
-            # 5. 정리
-            shopt -u dotglob
-            rm -rf temp_unzip
-            rm "$ZIP_FILE" # 다 쓴 zip 파일 삭제
-            
-            echo "✨ 배치 완료."
-          else
-            echo "❌ Zip 파일을 찾을 수 없습니다. (하위 폴더가 아닌 루트에 올려주세요)"
+          if [ -z "$ZIP_FILE" ] || [ ! -f "$ZIP_FILE" ]; then
+            echo "❌ zip 파일을 찾을 수 없습니다: $ZIP_FILE"
             exit 1
           fi
 
-      - name: Commit and Push
-        run: |
-          git config --global user.name "GitHub Action"
-          git config --global user.email "action@github.com"
-          
-          git add -A
-          
-          if [ -n "$(git status --porcelain)" ]; then
-            git commit -m "Reset & Update: $ZIP_FILE 적용 완료"
-            git push origin HEAD:${{ github.ref }}
-            echo "✅ 성공적으로 교체되었습니다."
+          echo "🚨 적용할 ZIP: $ZIP_FILE"
+
+          mkdir -p __zip_staging__
+          cp "$ZIP_FILE" "__zip_staging__/payload.zip"
+          echo "✅ zip staged: __zip_staging__/payload.zip"
+
+          echo "🧹 wipe..."
+          find . -maxdepth 1 \
+            ! -name '.git' \
+            ! -name '.github' \
+            ! -name '__zip_staging__' \
+            ! -name '.' \
+            -exec rm -rf {} +
+
+          echo "📦 unzip..."
+          mkdir -p temp_unzip
+          unzip -q -o "__zip_staging__/payload.zip" -d temp_unzip
+
+          # ✅ 핵심: zip 내부에 .github가 있으면 제거해서 충돌 방지
+          rm -rf temp_unzip/.github || true
+
+          COUNT=$(ls -1 temp_unzip | wc -l | tr -d ' ')
+          FIRST_ITEM=$(ls -1 temp_unzip | head -n 1)
+
+          shopt -s dotglob
+          if [ "$COUNT" -eq 1 ] && [ -d "temp_unzip/$FIRST_ITEM" ]; then
+            echo "📂 nested folder flatten: $FIRST_ITEM"
+            # nested 안에도 .github가 있을 수 있으니 또 제거
+            rm -rf "temp_unzip/$FIRST_ITEM/.github" || true
+            mv temp_unzip/"$FIRST_ITEM"/* .
           else
-            echo "변경사항이 없습니다."
+            echo "📄 direct files move"
+            mv temp_unzip/* .
           fi
+          shopt -u dotglob
+
+          rm -rf temp_unzip __zip_staging__
+          echo "✨ 배치 완료."
+          ls -la
+
+      - name: Commit and Push
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          git config user.name "GitHub Action"
+          git config user.email "action@github.com"
+
+          git add -A
+
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "변경사항이 없습니다."
+            exit 0
+          fi
+
+          git commit -m "Reset & Update: zip applied"
+
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          echo "✅ 성공적으로 교체되었습니다."
