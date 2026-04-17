@@ -7,7 +7,7 @@ import { MAX_RESERVED } from '../shared/constants';
 
 export default function ReservedStrip({ leads = [], onOpenCard }) {
   return (
-    <section className="panel p-3">
+    <section className="panel p-4">
       <div className="mb-3 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 text-white">
           <Pin size={16} className="text-amber-200" />
@@ -25,15 +25,15 @@ export default function ReservedStrip({ leads = [], onOpenCard }) {
               key={card.id}
               type="button"
               onClick={() => onOpenCard?.(card, 'reserved')}
-              className="tap-feedback w-[152px] shrink-0 text-left"
+              className="tap-feedback w-[164px] shrink-0 text-left"
             >
               <CardFace card={card} size="mini" emphasis />
             </button>
           ))}
         </div>
       ) : (
-        <div className="rounded-3xl border border-dashed border-white/10 bg-slate-950/30 px-4 py-8 text-center text-sm font-black text-slate-400">
-          아직 없다.
+        <div className="rounded-[20px] border border-dashed border-white/10 bg-slate-950/30 px-4 py-8 text-center text-sm font-black text-slate-400">
+          저장한 리드가 없다.
         </div>
       )}
     </section>

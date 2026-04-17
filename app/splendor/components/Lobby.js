@@ -49,7 +49,7 @@ export default function Lobby({
 
   useEffect(() => {
     if (!notice) return undefined;
-    const timer = window.setTimeout(() => setNotice(null), 1600);
+    const timer = window.setTimeout(() => setNotice(null), 1800);
     return () => window.clearTimeout(timer);
   }, [notice]);
 
@@ -61,7 +61,7 @@ export default function Lobby({
 
   const requireUser = () => {
     if (user?.uid) return true;
-    pushNotice('error', '잠시 후 다시 눌러라.');
+    pushNotice('error', '잠시 후 다시 시도해 주세요.');
     return false;
   };
 
@@ -72,17 +72,17 @@ export default function Lobby({
       await navigator.clipboard.writeText(`${baseUrl}?room=${roomCode}`);
       if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
       setCopyStatus('copied');
-      pushNotice('success', '복사됨');
+      pushNotice('success', '초대 링크를 복사했다.');
       copyTimerRef.current = window.setTimeout(() => setCopyStatus(null), 1200);
     } catch {
-      pushNotice('error', '복사 실패');
+      pushNotice('error', '초대 링크를 복사하지 못했다.');
     }
   };
 
   const handleCreate = async () => {
     if (!requireUser()) return;
     const nickname = playerName.trim();
-    if (!nickname) return pushNotice('error', '이름을 적어라.');
+    if (!nickname) return pushNotice('error', '이름을 입력해 주세요.');
 
     try {
       let createdCode = null;
@@ -136,12 +136,12 @@ export default function Lobby({
 
         if (!collided) createdCode = code;
       }
-      if (!createdCode) throw new Error('다시 눌러라.');
+      if (!createdCode) throw new Error('방 코드를 만들지 못했다.');
       setRoomCode(createdCode);
       setIsInviteMode(false);
-      pushNotice('success', createdCode);
+      pushNotice('success', `${createdCode} 방을 만들었다.`);
     } catch (error) {
-      pushNotice('error', error?.message || '실패');
+      pushNotice('error', error?.message || '방을 만들지 못했다.');
     }
   };
 
@@ -149,8 +149,8 @@ export default function Lobby({
     if (!requireUser()) return;
     const nickname = playerName.trim();
     const code = roomCode.trim().toUpperCase();
-    if (!nickname) return pushNotice('error', '이름을 적어라.');
-    if (code.length !== 4) return pushNotice('error', '코드 4자리');
+    if (!nickname) return pushNotice('error', '이름을 입력해 주세요.');
+    if (code.length !== 4) return pushNotice('error', '방 코드는 4자리다.');
 
     try {
       const roomRef = doc(db, 'rooms', code);
@@ -159,12 +159,12 @@ export default function Lobby({
 
       await runTransaction(db, async (tx) => {
         const roomSnap = await tx.get(roomRef);
-        if (!roomSnap.exists()) throw new Error('방이 없다.');
+        if (!roomSnap.exists()) throw new Error('방을 찾지 못했다.');
         const room = roomSnap.data();
-        if (room.status !== 'lobby') throw new Error('이미 시작됐다.');
+        if (room.status !== 'lobby') throw new Error('이미 시작된 방이다.');
 
         const lobbyIds = Array.isArray(room.lobbyPlayerIds) ? [...room.lobbyPlayerIds] : [];
-        if (!lobbyIds.includes(user.uid) && lobbyIds.length >= ROOM_MAX_PLAYERS) throw new Error('가득 찼다.');
+        if (!lobbyIds.includes(user.uid) && lobbyIds.length >= ROOM_MAX_PLAYERS) throw new Error('방이 가득 찼다.');
         if (!lobbyIds.includes(user.uid)) lobbyIds.push(user.uid);
 
         tx.set(roomRef, { lobbyPlayerIds: lobbyIds, updatedAt: serverTimestamp(), presenceAt: serverTimestamp() }, { merge: true });
@@ -174,15 +174,15 @@ export default function Lobby({
 
       setRoomCode(code);
       setIsInviteMode(false);
-      pushNotice('success', code);
+      pushNotice('success', `${code} 방에 들어갔다.`);
     } catch (error) {
-      pushNotice('error', error?.message || '실패');
+      pushNotice('error', error?.message || '입장하지 못했다.');
     }
   };
 
   const handleAddBot = async () => {
     if (!isHost) return;
-    if (lobbyPlayers.length >= ROOM_MAX_PLAYERS) return pushNotice('error', '가득 찼다.');
+    if (lobbyPlayers.length >= ROOM_MAX_PLAYERS) return pushNotice('error', '방이 가득 찼다.');
     const botId = createBotId();
     const botIndex = lobbyPlayers.filter((player) => player.isBot).length + 1;
     const botName = botIndex > 1 ? `${BOT_NAME} ${botIndex}` : BOT_NAME;
@@ -193,19 +193,19 @@ export default function Lobby({
       const playerPrivateRef = doc(db, 'rooms', roomCode, 'playersPrivate', botId);
       await runTransaction(db, async (tx) => {
         const roomSnap = await tx.get(roomRef);
-        if (!roomSnap.exists()) throw new Error('방이 없다.');
+        if (!roomSnap.exists()) throw new Error('방을 찾지 못했다.');
         const room = roomSnap.data();
-        if (room.status !== 'lobby') throw new Error('이미 시작됐다.');
+        if (room.status !== 'lobby') throw new Error('이미 시작된 방이다.');
         const lobbyIds = Array.isArray(room.lobbyPlayerIds) ? [...room.lobbyPlayerIds] : [];
-        if (lobbyIds.length >= ROOM_MAX_PLAYERS) throw new Error('가득 찼다.');
+        if (lobbyIds.length >= ROOM_MAX_PLAYERS) throw new Error('방이 가득 찼다.');
         lobbyIds.push(botId);
         tx.set(roomRef, { lobbyPlayerIds: lobbyIds, updatedAt: serverTimestamp(), presenceAt: serverTimestamp() }, { merge: true });
         tx.set(playerRef, { ...createPublicPlayerPayload(botName, true), name: botName, isBot: true, online: true, lastSeenAt: serverTimestamp() });
         tx.set(playerPrivateRef, createPrivatePlayerPayload());
       });
-      pushNotice('success', '봇 추가');
+      pushNotice('success', '기록관을 추가했다.');
     } catch (error) {
-      pushNotice('error', error?.message || '실패');
+      pushNotice('error', error?.message || '기록관을 추가하지 못했다.');
     }
   };
 
@@ -217,16 +217,16 @@ export default function Lobby({
       const playerPrivateRef = doc(db, 'rooms', roomCode, 'playersPrivate', botId);
       await runTransaction(db, async (tx) => {
         const roomSnap = await tx.get(roomRef);
-        if (!roomSnap.exists()) throw new Error('방이 없다.');
+        if (!roomSnap.exists()) throw new Error('방을 찾지 못했다.');
         const room = roomSnap.data();
         const lobbyIds = Array.isArray(room.lobbyPlayerIds) ? room.lobbyPlayerIds.filter((id) => id !== botId) : [];
         tx.set(roomRef, { lobbyPlayerIds: lobbyIds, updatedAt: serverTimestamp(), presenceAt: serverTimestamp() }, { merge: true });
         tx.delete(playerRef);
         tx.delete(playerPrivateRef);
       });
-      pushNotice('success', '봇 제거');
+      pushNotice('success', '기록관을 제거했다.');
     } catch (error) {
-      pushNotice('error', error?.message || '실패');
+      pushNotice('error', error?.message || '제거하지 못했다.');
     }
   };
 
@@ -237,9 +237,9 @@ export default function Lobby({
       const roomPrivateRef = doc(db, 'rooms', roomCode, 'meta', 'private');
       await runTransaction(db, async (tx) => {
         const roomSnap = await tx.get(roomRef);
-        if (!roomSnap.exists()) throw new Error('방이 없다.');
+        if (!roomSnap.exists()) throw new Error('방을 찾지 못했다.');
         const room = roomSnap.data();
-        if (room.status !== 'lobby') throw new Error('이미 시작됐다.');
+        if (room.status !== 'lobby') throw new Error('이미 시작된 방이다.');
 
         const roomPresence = toMillis(room.presenceAt || room.updatedAt || 0);
         const candidateIds = Array.isArray(room.lobbyPlayerIds) ? room.lobbyPlayerIds : [];
@@ -256,7 +256,7 @@ export default function Lobby({
           playerDocs.set(playerId, player);
         }
 
-        if (!live.length) throw new Error('참가자가 없다.');
+        if (!live.length) throw new Error('참가 인원이 없다.');
 
         const seed = createCaseSeed();
         const caseSetup = buildCaseSetup({ seed });
@@ -303,51 +303,53 @@ export default function Lobby({
         }, { merge: true });
         tx.set(roomPrivateRef, caseSetup.private, { merge: false });
       });
-      pushNotice('success', '시작');
+      pushNotice('success', '수사를 시작했다.');
     } catch (error) {
-      pushNotice('error', error?.message || '실패');
+      pushNotice('error', error?.message || '수사를 시작하지 못했다.');
     }
   };
 
   return (
     <div className="app-shell game-surface">
-      <div className="mx-auto min-h-screen w-full max-w-[480px] px-3 py-4">
-        <section className="panel p-4">
+      <div className="mx-auto flex w-full max-w-[560px] flex-col px-4 pb-[calc(2rem+var(--safe-bottom))] pt-[calc(1rem+var(--safe-top))]">
+        <section className="panel p-4 sm:p-5">
           <div className="border-b border-white/10 pb-5">
             <div className="flex items-start gap-3">
-              <div className="shrink-0 rounded-[20px] border border-[#675243]/40 bg-[#18130f] p-2.5">
-                <AssetImage src={UI_ASSET.caseSeal} className="h-11 w-11" />
+              <div className="shrink-0 rounded-[18px] border border-[#675243]/35 bg-[#18130f] p-2.5">
+                <AssetImage src={UI_ASSET.caseSeal} className="h-10 w-10" />
               </div>
               <div className="min-w-0">
-                <div className="text-[11px] font-black tracking-[0.22em] text-[#c7ae84]">사건 파일</div>
-                <h1 className="mt-2 break-words text-2xl font-black text-[#f7efe3]">{CASE_TITLE}</h1>
-                <p className="mt-2 text-sm font-bold leading-6 text-[#dfcfba]">전시장 안에서 살인이 났다. 왕관도 사라졌다.</p>
+                <div className="text-[11px] font-black tracking-[0.2em] text-[#bea37a]">사건 파일</div>
+                <h1 className="mt-1 break-words text-[28px] font-black leading-tight text-[#f7efe3]">{CASE_TITLE}</h1>
+                <p className="mt-2 text-sm font-bold leading-6 text-[#dfcfba]">전시장 안에서 시신이 발견됐다. 왕관도 사라졌다.</p>
               </div>
             </div>
           </div>
 
           <div className="grid gap-4 pt-4">
-            <label className="panel-soft px-4 py-3">
-              <div className="text-[11px] font-black tracking-[0.16em] text-slate-400">이름</div>
-              <input
-                value={playerName}
-                onChange={(event) => setPlayerName(event.target.value.slice(0, 14))}
-                placeholder="이름"
-                className="mt-2 w-full bg-transparent text-base font-black text-white outline-none placeholder:text-slate-500"
-              />
-            </label>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="panel-soft px-4 py-3">
+                <div className="text-[11px] font-black tracking-[0.16em] text-slate-400">이름</div>
+                <input
+                  value={playerName}
+                  onChange={(event) => setPlayerName(event.target.value.slice(0, 14))}
+                  placeholder="이름 입력"
+                  className="mt-2 w-full bg-transparent text-base font-black text-white outline-none placeholder:text-slate-500"
+                />
+              </label>
 
-            <label className="panel-soft px-4 py-3">
-              <div className="text-[11px] font-black tracking-[0.16em] text-slate-400">방 코드</div>
-              <input
-                value={roomCode}
-                onChange={(event) => setRoomCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4))}
-                placeholder="ABCD"
-                className="mt-2 w-full bg-transparent text-base font-black uppercase tracking-[0.22em] text-white outline-none placeholder:text-slate-500"
-              />
-            </label>
+              <label className="panel-soft px-4 py-3">
+                <div className="text-[11px] font-black tracking-[0.16em] text-slate-400">방 코드</div>
+                <input
+                  value={roomCode}
+                  onChange={(event) => setRoomCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4))}
+                  placeholder="ABCD"
+                  className="mt-2 w-full bg-transparent text-base font-black uppercase tracking-[0.22em] text-white outline-none placeholder:text-slate-500"
+                />
+              </label>
+            </div>
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-3">
               <button type="button" onClick={handleCreate} className="tap-feedback min-h-12 rounded-2xl border border-[#7c8f73]/25 bg-[#7c8f73]/12 px-4 py-3 text-sm font-black text-[#eef5e6]">
                 <span className="inline-flex items-center gap-2 whitespace-normal"><Plus size={16} /> 방 만들기</span>
               </button>
@@ -357,20 +359,20 @@ export default function Lobby({
             </div>
 
             {isInviteMode ? (
-              <div className="rounded-2xl border border-[#6b8196]/20 bg-[#223142]/18 px-4 py-3 text-sm font-black text-[#e3edf7]">초대 링크로 들어옴</div>
+              <div className="rounded-2xl border border-[#6b8196]/20 bg-[#223142]/18 px-4 py-3 text-sm font-black text-[#e3edf7]">초대 링크로 접속했다.</div>
             ) : null}
 
             {roomData?.status === 'lobby' ? (
-              <div className="rounded-3xl border border-white/10 bg-black/10 p-3">
+              <div className="rounded-[24px] border border-white/10 bg-black/10 p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="text-sm font-black text-[#f7efe3]">대기 {lobbyPlayers.length}/{ROOM_MAX_PLAYERS}</div>
+                  <div className="text-sm font-black text-[#f7efe3]">대기 인원 {lobbyPlayers.length}/{ROOM_MAX_PLAYERS}</div>
                   <div className="flex flex-wrap gap-2">
                     <button type="button" onClick={copyInviteLink} disabled={!roomCode} className={`tap-feedback min-h-11 rounded-2xl border px-3 py-2 text-sm font-black ${copyStatus === 'copied' ? 'border-[#7c8f73]/25 bg-[#7c8f73]/12 text-[#eef5e6]' : 'border-white/10 bg-black/10 text-[#f2e7d3]'}`}>
-                      <span className="inline-flex items-center gap-2 whitespace-normal"><Copy size={14} /> {copyStatus === 'copied' ? '복사됨' : '초대 링크'}</span>
+                      <span className="inline-flex items-center gap-2 whitespace-normal"><Copy size={14} /> {copyStatus === 'copied' ? '복사 완료' : '초대 링크'}</span>
                     </button>
                     {isHost ? (
                       <button type="button" onClick={handleAddBot} className="tap-feedback min-h-11 rounded-2xl border border-white/10 bg-black/10 px-3 py-2 text-sm font-black text-[#f2e7d3]">
-                        <span className="inline-flex items-center gap-2 whitespace-normal"><Bot size={14} /> 봇 추가</span>
+                        <span className="inline-flex items-center gap-2 whitespace-normal"><Bot size={14} /> 기록관 추가</span>
                       </button>
                     ) : null}
                   </div>
@@ -382,22 +384,22 @@ export default function Lobby({
                     return (
                       <div key={player.id} className="panel-soft flex items-center justify-between gap-3 px-4 py-3">
                         <div className="min-w-0">
-                          <div className="truncate text-sm font-black text-[#f7efe3]">{getDisplayName(player)}</div>
+                          <div className="break-words text-sm font-black text-[#f7efe3]">{getDisplayName(player)}</div>
                           <div className="mt-1 flex flex-wrap gap-2 text-[11px] font-black text-[#cdbda8]">
                             {player.id === roomData?.hostId ? <span className="rounded-full border border-[#8a6b42]/25 bg-[#8a6b42]/12 px-2 py-0.5 text-[#f4e9d4]">주최</span> : null}
-                            {player.isBot ? <span className="rounded-full border border-[#6b8196]/25 bg-[#223142]/18 px-2 py-0.5 text-[#e3edf7]">봇</span> : null}
+                            {player.isBot ? <span className="rounded-full border border-[#6b8196]/25 bg-[#223142]/18 px-2 py-0.5 text-[#e3edf7]">기록관</span> : null}
                             {!player.isBot ? <span className={`rounded-full border px-2 py-0.5 ${stale ? 'border-[#8a4636]/25 bg-[#8a4636]/14 text-[#f5d7d0]' : 'border-[#7c8f73]/25 bg-[#7c8f73]/12 text-[#eef5e6]'}`}>{stale ? '자리 비움' : '대기 중'}</span> : null}
                           </div>
                         </div>
                         {isHost && player.isBot ? (
-                          <button type="button" onClick={() => handleRemoveBot(player.id)} className="tap-feedback rounded-2xl border border-white/10 bg-black/10 p-2 text-[#d5c7b4]" aria-label="제거">
+                          <button type="button" onClick={() => handleRemoveBot(player.id)} className="tap-feedback rounded-2xl border border-white/10 bg-black/10 p-2 text-[#d5c7b4]" aria-label="기록관 제거">
                             <X size={15} />
                           </button>
                         ) : null}
                       </div>
                     );
                   }) : (
-                    <div className="panel-soft px-4 py-4 text-sm font-black text-slate-400">참가자가 없다.</div>
+                    <div className="panel-soft px-4 py-4 text-sm font-black text-slate-400">참가 인원이 없다.</div>
                   )}
                 </div>
 

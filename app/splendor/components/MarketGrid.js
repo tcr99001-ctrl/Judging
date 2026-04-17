@@ -7,8 +7,8 @@ import { useFX } from '../fx/FXProvider';
 
 function DeckBadge({ count }) {
   return (
-    <div className="rounded-full border border-white/10 bg-slate-950/50 px-2.5 py-1 text-[11px] font-black text-slate-200">
-      남은 장수 {count}
+    <div className="rounded-full border border-white/8 bg-black/10 px-2.5 py-1 text-[11px] font-black text-slate-200">
+      잔여 {count}
     </div>
   );
 }
@@ -22,17 +22,17 @@ export default function MarketGrid({ roomData, onOpenCard }) {
         const cards = roomData?.board?.[tier] || [];
         const deckCount = Array.isArray(roomData?.decks?.[tier]) ? roomData.decks[tier].length : 0;
         return (
-          <section key={tier} className="panel p-3">
+          <section key={tier} className="panel p-4">
             <div className="mb-3 flex items-center justify-between gap-2">
               <div>
-                <div className="text-[11px] font-black tracking-[0.2em] text-slate-400">수사 보드</div>
+                <div className="text-[11px] font-black tracking-[0.18em] text-slate-400">수사 보드</div>
                 <div className="mt-1 text-base font-black text-white">{TIER_LABEL[tier]}</div>
               </div>
               <DeckBadge count={deckCount} />
             </div>
 
             {cards.length ? (
-              <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2">
+              <div className="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2">
                 {cards.map((card) => (
                   <button
                     key={card.id}
@@ -46,8 +46,8 @@ export default function MarketGrid({ roomData, onOpenCard }) {
                 ))}
               </div>
             ) : (
-              <div className="rounded-3xl border border-dashed border-white/10 bg-slate-950/30 px-4 py-8 text-center text-sm font-black text-slate-400">
-                더 나올 단서가 없다.
+              <div className="rounded-[20px] border border-dashed border-white/10 bg-black/10 px-4 py-8 text-center text-sm font-black text-slate-400">
+                더 확인할 단서가 없다.
               </div>
             )}
           </section>

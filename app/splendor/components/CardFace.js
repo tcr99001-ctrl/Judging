@@ -32,35 +32,36 @@ export default function CardFace({
     + (card.directives?.eliminateMotives?.length || 0)
     + (card.directives?.eliminateMethods?.length || 0);
   const serial = String(card.id || card.key || '').replace(/[^A-Z0-9]/gi, '').slice(-6).toUpperCase() || 'CASE';
+  const shownThreads = compact ? (card.threads || []).slice(0, 2) : (card.threads || []).slice(0, 4);
 
   return (
     <div
       className={[
-        'relative flex h-full min-h-[186px] flex-col overflow-hidden rounded-[22px] border shadow-[0_18px_32px_rgba(10,7,6,0.26)]',
+        'relative flex min-h-[208px] flex-col rounded-[20px] border shadow-[0_10px_20px_rgba(10,7,6,0.18)]',
         TIER_FRAME[card.tier] || TIER_FRAME[1],
-        compact ? 'min-h-[136px] rounded-[18px]' : '',
-        emphasis ? 'ring-2 ring-[#8a4636]/40' : '',
+        compact ? 'min-h-[164px] rounded-[18px]' : '',
+        emphasis ? 'ring-2 ring-[#8a4636]/35' : '',
         className,
       ].join(' ')}
       style={{
-        backgroundImage: `linear-gradient(180deg, rgba(255,255,255,0.22), rgba(0,0,0,0.04)), url(${UI_ASSET.clueBack})`,
+        backgroundImage: `linear-gradient(180deg, rgba(255,255,255,0.18), rgba(0,0,0,0.03)), url(${UI_ASSET.clueBack})`,
         backgroundSize: 'cover, cover',
         backgroundPosition: 'center, center',
       }}
     >
-      <div className="pointer-events-none absolute inset-0 opacity-[0.18] mix-blend-multiply">
+      <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit] opacity-[0.12] mix-blend-multiply">
         <AssetImage src={CARD_MARK_ASSET[card.mark]} className="absolute -right-3 top-3 h-24 w-24 rotate-[10deg]" />
       </div>
 
-      <div className="relative flex items-start justify-between gap-3 border-b border-[#4b3a31]/20 px-3.5 pb-2 pt-3">
+      <div className="relative flex items-start justify-between gap-3 border-b border-[#4b3a31]/16 px-3.5 pb-2.5 pt-3">
         <div className="flex min-w-0 items-start gap-2.5">
           <AssetImage src={TIER_EMBLEM_ASSET[card.tier]} className={compact ? 'mt-0.5 h-7 w-7 shrink-0' : 'mt-0.5 h-8 w-8 shrink-0'} />
           <div className="min-w-0">
-            <div className="text-[10px] font-black tracking-[0.24em] text-[#5b4a3f]">{TIER_LABEL[card.tier]}</div>
-            <div className={[compact ? 'mt-1 text-sm' : 'mt-1.5 text-[15px]', 'line-clamp-2 font-black leading-snug text-[#231c18]'].join(' ')}>{card.title}</div>
+            <div className="text-[10px] font-black tracking-[0.22em] text-[#5b4a3f]">{TIER_LABEL[card.tier]}</div>
+            <div className={[compact ? 'mt-1 text-[13px]' : 'mt-1.5 text-[15px]', 'break-words font-black leading-snug text-[#231c18]'].join(' ')}>{card.title}</div>
           </div>
         </div>
-        <div className="rounded-md border border-[#4b3a31]/20 bg-[#f2e8d5]/70 px-2 py-1 text-[10px] font-black tracking-[0.14em] text-[#4f4036]">
+        <div className="shrink-0 rounded-md border border-[#4b3a31]/16 bg-[#f2e8d5]/70 px-2 py-1 text-[10px] font-black tracking-[0.14em] text-[#4f4036]">
           {serial}
         </div>
       </div>
@@ -71,22 +72,22 @@ export default function CardFace({
             {GEM_LABEL[card.line]}
           </span>
           {directiveCount ? (
-            <span className="rounded-full border border-[#8a4636]/30 bg-[#8a4636]/10 px-2 py-1 text-[10px] font-black text-[#5f2f25]">
+            <span className="rounded-full border border-[#8a4636]/24 bg-[#8a4636]/08 px-2 py-1 text-[10px] font-black text-[#5f2f25]">
               제거 {directiveCount}
             </span>
           ) : null}
         </div>
 
-        <p className={[compact ? 'text-[11px] line-clamp-3' : 'text-[12px] line-clamp-4', 'font-bold leading-5 text-[#3b322b]'].join(' ')}>{card.summary}</p>
+        <p className={[compact ? 'text-[11px] line-clamp-3' : 'text-[12px]', 'break-words font-bold leading-5 text-[#3b322b]'].join(' ')}>{card.summary}</p>
 
         <div className="mt-2">
-          <AssetImage src={UI_ASSET.scratchDivider} className="h-4 w-full object-cover opacity-75" />
+          <AssetImage src={UI_ASSET.scratchDivider} className="h-4 w-full object-cover opacity-70" />
         </div>
 
         <div className="mt-auto pt-3">
           <div className="flex flex-wrap gap-1.5">
-            {(card.threads || []).slice(0, compact ? 2 : 4).map((thread) => (
-              <span key={thread} className="rounded-full border border-[#4b3a31]/18 bg-[#f7f0e3]/62 px-2 py-1 text-[10px] font-black text-[#4b3a31]">
+            {shownThreads.map((thread) => (
+              <span key={thread} className="rounded-full border border-[#4b3a31]/16 bg-[#f7f0e3]/62 px-2 py-1 text-[10px] font-black text-[#4b3a31]">
                 {thread}
               </span>
             ))}

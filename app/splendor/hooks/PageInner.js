@@ -26,7 +26,7 @@ import GemModal from '../modals/GemModal';
 import NobleModal from '../modals/NobleModal';
 import OpponentModal from '../modals/OpponentModal';
 import { STALE_PLAYER_MS } from '../shared/constants';
-import { getDisplayName, isPlayerStaleFromPresence, toMillis } from '../shared/utils';
+import { isPlayerStaleFromPresence, toMillis } from '../shared/utils';
 
 export default function PageInner() {
   const fx = useFX();
@@ -155,7 +155,7 @@ export default function PageInner() {
       await job();
       if (successText) pushToast(successText, 'success');
     } catch (error) {
-      pushToast(error?.message || '실패', 'error');
+      pushToast(error?.message || '처리하지 못했다.', 'error');
     }
   }, [pushToast]);
 
@@ -167,9 +167,9 @@ export default function PageInner() {
       setCopyStatus('copied');
       if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
       copyTimerRef.current = window.setTimeout(() => setCopyStatus(null), 1200);
-      pushToast('복사됨', 'success');
+      pushToast('초대 링크를 복사했다.', 'success');
     } catch {
-      pushToast('복사 실패', 'error');
+      pushToast('초대 링크를 복사하지 못했다.', 'error');
     }
   }, [pushToast, roomCode]);
 
@@ -179,43 +179,43 @@ export default function PageInner() {
   }, []);
 
   const handleTake = useCallback(async (cardId) => {
-    await withMove(() => actions.onTakeClue(cardId), '단서 확보');
+    await withMove(() => actions.onTakeClue(cardId), '단서를 확보했다.');
     setActiveCard(null);
   }, [actions, withMove]);
 
   const handleToggleLead = useCallback(async (clueId) => {
-    await withMove(() => actions.onFileLead(clueId), '리드 정리');
+    await withMove(() => actions.onFileLead(clueId), '리드를 정리했다.');
     setActiveCard(null);
   }, [actions, withMove]);
 
   const handleCrosscheck = useCallback(async ({ aId, bId }) => {
-    await withMove(() => actions.onCrosscheck({ aId, bId }), '대조 완료');
+    await withMove(() => actions.onCrosscheck({ aId, bId }), '기록 대조를 마쳤다.');
     setCrosscheckOpen(false);
   }, [actions, withMove]);
 
   const handleInterrogate = useCallback(async (witnessId) => {
-    await withMove(() => actions.onInterrogate(witnessId), '추궁 완료');
+    await withMove(() => actions.onInterrogate(witnessId), '추궁을 마쳤다.');
     setWitnessModal(null);
   }, [actions, withMove]);
 
   const handleAccuse = useCallback(async ({ culpritId, motiveId, methodId }) => {
-    await withMove(() => actions.onAccuse({ culpritId, motiveId, methodId }), '고발');
+    await withMove(() => actions.onAccuse({ culpritId, motiveId, methodId }), '고발을 접수했다.');
     setShowAccuse(false);
   }, [actions, withMove]);
 
   const handleEndTurn = useCallback(async () => {
-    await withMove(() => actions.onEndTurn(), '턴 종료');
+    await withMove(() => actions.onEndTurn(), '턴을 넘겼다.');
   }, [actions, withMove]);
 
   const handleForceStaleSkip = useCallback(async () => {
     if (!currentId) return;
-    await withMove(() => actions.onForceStaleSkip(currentId), '넘김');
+    await withMove(() => actions.onForceStaleSkip(currentId), '차례를 넘겼다.');
   }, [actions, currentId, withMove]);
 
   if (!ready) {
     return (
       <div className="app-shell game-surface px-4 py-6">
-        <div className="mx-auto w-full max-w-[480px]">
+        <div className="mx-auto w-full max-w-[560px]">
           <div className="panel px-5 py-5 text-center text-sm font-black text-slate-200">불러오는 중</div>
         </div>
       </div>
@@ -245,46 +245,44 @@ export default function PageInner() {
 
   return (
     <div className="app-shell game-surface">
-      <div className="mx-auto min-h-screen w-full max-w-[480px] px-3 pb-[calc(1.5rem+var(--safe-bottom))] pt-3">
-        <div className="grid gap-4">
-          <GameHeader
-            roomData={roomData}
-            roomCode={roomCode}
-            players={players}
-            myId={user?.uid}
-            currentPlayer={currentPlayer}
-            copyStatus={copyStatus}
-            onCopyInvite={handleCopyInvite}
-            onToggleGuide={() => setGuideOpen(true)}
-            onOpenPlayer={setOpponent}
-          />
+      <div className="mx-auto flex w-full max-w-[560px] flex-col gap-4 px-4 pb-[calc(2rem+var(--safe-bottom))] pt-[calc(0.75rem+var(--safe-top))]">
+        <GameHeader
+          roomData={roomData}
+          roomCode={roomCode}
+          players={players}
+          myId={user?.uid}
+          currentPlayer={currentPlayer}
+          copyStatus={copyStatus}
+          onCopyInvite={handleCopyInvite}
+          onToggleGuide={() => setGuideOpen(true)}
+          onOpenPlayer={setOpponent}
+        />
 
-          <MarketGrid roomData={roomData} onOpenCard={openCard} />
+        <MarketGrid roomData={roomData} onOpenCard={openCard} />
 
-          <NobleStrip
-            witnesses={roomData?.witnessStrip || []}
-            myData={myData || {}}
-            onOpenWitness={setWitnessModal}
-          />
+        <NobleStrip
+          witnesses={roomData?.witnessStrip || []}
+          myData={myData || {}}
+          onOpenWitness={setWitnessModal}
+        />
 
-          <ReservedStrip
-            leads={myData?.reservedLeads || []}
-            onOpenCard={openCard}
-          />
+        <ReservedStrip
+          leads={myData?.reservedLeads || []}
+          onOpenCard={openCard}
+        />
 
-              <Dashboard
-            myData={myData || {}}
-            roomData={roomData}
-            isMyTurn={isMyTurn}
-            actionUsed={actionUsed}
-            canForceStaleSkip={canForceStaleSkip}
-            onOpenLeadManager={() => setLeadManagerOpen(true)}
-            onOpenCrosscheck={() => setCrosscheckOpen(true)}
-            onOpenAccuse={() => setShowAccuse(true)}
-            onEndTurn={handleEndTurn}
-            onForceStaleSkip={handleForceStaleSkip}
-          />
-        </div>
+        <Dashboard
+          myData={myData || {}}
+          roomData={roomData}
+          isMyTurn={isMyTurn}
+          actionUsed={actionUsed}
+          canForceStaleSkip={canForceStaleSkip}
+          onOpenLeadManager={() => setLeadManagerOpen(true)}
+          onOpenCrosscheck={() => setCrosscheckOpen(true)}
+          onOpenAccuse={() => setShowAccuse(true)}
+          onEndTurn={handleEndTurn}
+          onForceStaleSkip={handleForceStaleSkip}
+        />
       </div>
 
       <CardModal

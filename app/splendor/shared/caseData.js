@@ -1,14 +1,14 @@
 import { CASE_TAGLINE, CASE_TITLE } from './constants';
 
 export const CASE_BRIEFING = [
-  '전시장 안에서 살인이 났다.',
+  '전시장 안에서 시신이 발견됐다.',
   '왕관도 사라졌다.',
 ];
 
 export const GUIDE_STEPS = [
-  { title: '단서 확보', body: '보드에서 단서를 하나 고른다.' },
-  { title: '리드 정리', body: '중요한 단서를 따로 묶는다.' },
-  { title: '기록 대조', body: '키워드가 겹치는 두 장을 맞춘다.' },
+  { title: '단서 확보', body: '보드에서 단서 한 장을 확보한다.' },
+  { title: '리드 정리', body: '중요한 단서를 따로 묶어 둔다.' },
+  { title: '기록 대조', body: '키워드가 겹치는 두 장을 맞춰 본다.' },
   { title: '추궁', body: '조건이 맞는 인물을 확인한다.' },
   { title: '고발', body: '범인, 동기, 수법을 선택한다.' },
 ];
@@ -199,7 +199,7 @@ export function buildReveal(solution) {
 
   const summary = culprit && motive && method
     ? `${culprit.name}이 ${motive.label} 때문에 ${method.label}을 사용했다.`
-    : '정답을 끝까지 확정하지 못했다.';
+    : '정답을 확정하지 못했다.';
 
   return {
     culpritId: culprit?.id || null,
@@ -212,7 +212,7 @@ export function buildReveal(solution) {
     headline: '사건 정리',
     summary,
     endingLines: [
-      CASE_TAGLINE,
+      '사건 정리가 끝났다.',
       culprit ? `범인: ${culprit.name} · ${culprit.role}` : '',
       motive ? `동기: ${motive.label}` : '',
       method ? `수법: ${method.label}` : '',

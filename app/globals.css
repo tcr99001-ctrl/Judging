@@ -23,7 +23,6 @@
 html,
 body {
   width: 100%;
-  height: 100%;
   min-height: 100%;
   background:
     url('/assets/casefiles/ui/archive_tile.svg') center/512px 512px repeat,
@@ -31,13 +30,12 @@ body {
     radial-gradient(circle at 82% 8%, rgba(53, 72, 95, 0.18), transparent 22%),
     linear-gradient(180deg, #15100d 0%, #1d1612 36%, #261e1a 100%);
   color: #f8fafc;
-  overscroll-behavior-y: contain;
 }
 
 body {
   margin: 0;
+  min-height: 100dvh;
   overflow-x: hidden;
-  overflow-y: auto;
   font-family: Inter, Pretendard, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
@@ -76,10 +74,10 @@ textarea {
 @layer components {
   .app-shell {
     position: relative;
-    min-height: 100svh;
+    display: flex;
     min-height: 100dvh;
-    overflow-x: hidden;
-    overflow-y: auto;
+    flex-direction: column;
+    overflow: visible;
     background: transparent;
     color: #f8fafc;
     isolation: isolate;
@@ -120,22 +118,24 @@ textarea {
 
   .panel {
     position: relative;
-    border-radius: 1.5rem;
-    border: 1px solid rgba(212, 188, 155, 0.16);
+    border-radius: 1.25rem;
+    border: 1px solid rgba(212, 188, 155, 0.15);
     background:
-      linear-gradient(180deg, rgba(255, 246, 228, 0.05), rgba(255, 246, 228, 0.015)),
-      rgba(25, 19, 16, 0.84);
-    box-shadow: 0 12px 24px rgba(9, 7, 6, 0.28);
+      linear-gradient(180deg, rgba(255, 246, 228, 0.04), rgba(255, 246, 228, 0.012)),
+      rgba(23, 18, 15, 0.9);
+    box-shadow: 0 10px 20px rgba(9, 7, 6, 0.22);
+    backdrop-filter: blur(6px);
   }
 
   .panel-soft {
     position: relative;
     border-radius: 1rem;
-    border: 1px solid rgba(212, 188, 155, 0.14);
+    border: 1px solid rgba(212, 188, 155, 0.12);
     background:
-      linear-gradient(180deg, rgba(255, 247, 231, 0.035), rgba(255, 247, 231, 0.01)),
-      rgba(35, 27, 22, 0.74);
-    box-shadow: 0 8px 18px rgba(9, 7, 6, 0.22);
+      linear-gradient(180deg, rgba(255, 247, 231, 0.03), rgba(255, 247, 231, 0.01)),
+      rgba(31, 24, 20, 0.78);
+    box-shadow: 0 6px 14px rgba(9, 7, 6, 0.16);
+    backdrop-filter: blur(4px);
   }
 
   .tap-feedback {
@@ -377,7 +377,7 @@ textarea {
     z-index: 60;
     display: flex;
     justify-content: center;
-    padding: calc(var(--safe-top) + 72px) 0.75rem 0 0.75rem;
+    padding: calc(var(--safe-top) + 0.75rem) 0.75rem 0 0.75rem;
   }
 
   .toast-stack {
@@ -428,8 +428,8 @@ textarea {
     display: flex;
     align-items: flex-end;
     justify-content: center;
-    padding: 0.625rem;
-    padding-bottom: calc(var(--safe-bottom) + 0.625rem);
+    overflow-y: auto;
+    padding: calc(var(--safe-top) + 0.75rem) 0.75rem calc(var(--safe-bottom) + 0.75rem);
     pointer-events: none;
   }
 
@@ -443,21 +443,23 @@ textarea {
   .modal-panel {
     position: relative;
     z-index: 1;
+    display: flex;
     width: 100%;
+    max-height: calc(100dvh - var(--safe-top) - var(--safe-bottom) - 1.5rem);
+    flex-direction: column;
     pointer-events: auto;
-    max-height: min(88dvh, calc(100svh - var(--safe-bottom) - 1.25rem));
-    overflow-y: auto;
+    overflow: hidden;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
   }
 
   .modal-panel-compact {
-    max-height: min(74dvh, calc(100svh - var(--safe-bottom) - 1.25rem));
+    max-height: calc(100dvh - var(--safe-top) - var(--safe-bottom) - 4rem);
   }
 
   .modal-panel-card {
     max-width: 24rem;
-    max-height: min(82dvh, calc(100svh - var(--safe-bottom) - 1rem));
+    max-height: calc(100dvh - var(--safe-top) - var(--safe-bottom) - 2rem);
     overflow-x: hidden;
   }
 
@@ -489,7 +491,7 @@ textarea {
 
     .modal-panel-card {
       max-width: 26rem;
-      max-height: min(78dvh, calc(100svh - 2rem));
+      max-height: calc(100dvh - 2rem);
     }
   }
 }

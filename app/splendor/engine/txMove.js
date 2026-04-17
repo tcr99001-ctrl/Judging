@@ -77,7 +77,7 @@ export async function txMove({
     if (room.status !== 'playing' && room.status !== 'final_round') throw new Error('지금은 진행 중이 아니다.');
 
     const roomPrivateSnap = await tx.get(roomPrivateRef);
-    if (!roomPrivateSnap.exists()) throw new Error('사건 파일이 비어 있다.');
+    if (!roomPrivateSnap.exists()) throw new Error('사건 파일을 읽지 못했다.');
     const roomPrivate = roomPrivateSnap.data();
     const solution = roomPrivate.solution;
     const reveal = roomPrivate.caseMeta?.reveal || buildReveal(solution);
@@ -86,21 +86,21 @@ export async function txMove({
     const turnIndex = Number(room.turnIndex || 0);
     const turnNumber = Number(room.turnNumber || 1);
     const currentId = turnOrder[turnIndex];
-    if (!currentId) throw new Error('현재 차례가 비어 있다.');
+    if (!currentId) throw new Error('현재 차례를 확인할 수 없다.');
 
     const roomPresenceAt = toMillis(room.presenceAt || room.updatedAt || 0);
     const callerId = requesterId || auth.currentUser?.uid || actorId;
     const callerIsParticipant = turnOrder.includes(callerId);
 
     if (type === 'FORCE_STALE_SKIP') {
-      if (actorId !== currentId) throw new Error('지금 차례만 넘길 수 있다.');
+      if (actorId !== currentId) throw new Error('현재 차례만 넘길 수 있다.');
       if (!callerIsParticipant || callerId === actorId) throw new Error('다른 참가자만 넘길 수 있다.');
     } else {
-      if (actorId !== currentId) throw new Error('지금 차례가 아니다.');
+      if (actorId !== currentId) throw new Error('지금은 내 차례가 아니다.');
     }
 
     const actorPublicSnap = await tx.get(actorPublicRef);
-    if (!actorPublicSnap.exists()) throw new Error('수사관 정보가 없다.');
+    if (!actorPublicSnap.exists()) throw new Error('참가자 정보를 찾지 못했다.');
     const actorPrivateSnap = await tx.get(actorPrivateRef);
 
     const mePublic = actorPublicSnap.data();
@@ -111,7 +111,7 @@ export async function txMove({
     const isSelfRequest = callerId === actorId;
     const isHostDrivingBot = !!mePublic.isBot && callerId === room.hostId;
     if (type !== 'FORCE_STALE_SKIP' && !isSelfRequest && !isHostDrivingBot) {
-      throw new Error('이 수사관을 대신 움직일 수 없다.');
+      throw new Error('이 참가자를 대신 움직일 수 없다.');
     }
 
     const board = cloneBoard(room.board || { 1: [], 2: [], 3: [] });
@@ -140,7 +140,7 @@ export async function txMove({
     const lock = room.actionLock || { turnIndex, playerId: actorId, used: false };
     const mainActionTypes = ['TAKE_CLUE', 'FILE_LEAD', 'CROSSCHECK', 'INTERROGATE', 'ACCUSE'];
     if (mainActionTypes.includes(type)) {
-      if (lock.playerId !== actorId || lock.turnIndex !== turnIndex) throw new Error('행동 잠금이 어긋났다.');
+      if (lock.playerId !== actorId || lock.turnIndex !== turnIndex) throw new Error('행동 상태를 다시 확인해 주세요.');
       if (lock.used) throw new Error('이번 턴 행동은 이미 끝났다.');
     }
 
@@ -312,7 +312,7 @@ export async function txMove({
           break;
         }
       }
-      if (!picked || pickedTier == null || pickedIndex < 0) throw new Error('그 단서를 찾지 못했다.');
+      if (!picked || pickedTier == null || pickedIndex < 0) throw new Error('선택한 단서를 찾지 못했다.');
 
       privateClues.push(picked);
       refillBoardSlot(pickedTier, pickedIndex);
@@ -333,8 +333,8 @@ export async function txMove({
         notebook = applyNotebookEffect(notebook, {}, '리드 해제');
       } else {
         const clue = privateClues.find((card) => card.id === clueId);
-        if (!clue) throw new Error('내 단서만 세울 수 있다.');
-        if (reservedLeads.length >= MAX_RESERVED) throw new Error('리드는 셋까지다.');
+        if (!clue) throw new Error('내 단서만 리드로 둘 수 있다.');
+        if (reservedLeads.length >= MAX_RESERVED) throw new Error('리드는 세 장까지 둘 수 있다.');
         reservedLeads.push(deepClone(clue));
         notebook = applyNotebookEffect(notebook, {}, `${clue.title} 고정`);
       }
@@ -349,16 +349,16 @@ export async function txMove({
     if (type === 'CROSSCHECK') {
       const aId = payload.aId;
       const bId = payload.bId;
-      if (!aId || !bId || aId === bId) throw new Error('단서 둘이 필요하다.');
+      if (!aId || !bId || aId === bId) throw new Error('단서 두 장이 필요하다.');
 
       const cardA = findClueById({ privateClues, reservedLeads }, aId);
       const cardB = findClueById({ privateClues, reservedLeads }, bId);
-      if (!cardA || !cardB) throw new Error('대조할 단서가 없다.');
+      if (!cardA || !cardB) throw new Error('대조할 단서를 찾지 못했다.');
 
       const shared = getSharedThreads(cardA, cardB);
       if (!shared.length) throw new Error('겹치는 키워드가 없다.');
       const key = pairKey(aId, bId);
-      if (crosscheckPairs.includes(key)) throw new Error('이미 묶은 조합이다.');
+      if (crosscheckPairs.includes(key)) throw new Error('이미 대조한 조합이다.');
 
       crosscheckPairs.push(key);
       const combined = {
@@ -382,10 +382,10 @@ export async function txMove({
     if (type === 'INTERROGATE') {
       const witnessId = payload.witnessId;
       const index = witnessStrip.findIndex((entry) => entry.id === witnessId);
-      if (index < 0) throw new Error('그 인물은 더 이상 없다.');
+      if (index < 0) throw new Error('해당 인물을 찾지 못했다.');
       const witness = witnessStrip[index];
       if (!canInterrogate({ reservedLeads, crosscheckPairs, interrogatedWitnessIds }, witness)) {
-        throw new Error('아직 추궁을 열지 못했다.');
+        throw new Error('아직 추궁할 수 없다.');
       }
       witnessStrip.splice(index, 1);
       interrogatedWitnessIds.push(witnessId);
@@ -407,11 +407,11 @@ export async function txMove({
     }
 
     if (type === 'ACCUSE') {
-      if (!canAccuse({ caseProgress, accusationLocked, notebook }, room)) throw new Error('아직 고발할 때가 아니다.');
+      if (!canAccuse({ caseProgress, accusationLocked, notebook }, room)) throw new Error('아직 고발할 수 없다.');
       const culpritId = payload.culpritId;
       const motiveId = payload.motiveId;
       const methodId = payload.methodId;
-      if (!culpritId || !motiveId || !methodId) throw new Error('셋 다 골라야 한다.');
+      if (!culpritId || !motiveId || !methodId) throw new Error('범인, 동기, 수법을 모두 골라야 한다.');
 
       const attempt = { culpritId, motiveId, methodId, at: Date.now() };
       const isCorrect = culpritId === solution.culpritId && motiveId === solution.motiveId && methodId === solution.methodId;
@@ -448,10 +448,10 @@ export async function txMove({
 
     if (type === 'FORCE_STALE_SKIP') {
       const currentPlayerSnap = await tx.get(doc(db, 'rooms', roomCode, 'players', actorId));
-      if (!currentPlayerSnap.exists()) throw new Error('현재 수사관이 없다.');
+      if (!currentPlayerSnap.exists()) throw new Error('현재 참가자를 찾지 못했다.');
       const currentPlayer = currentPlayerSnap.data();
       const stale = !currentPlayer.isBot && isPlayerStaleFromPresence({ player: currentPlayer, roomPresenceAt, staleMs: STALE_PLAYER_MS });
-      if (!stale) throw new Error('아직 넘길 수 없다.');
+      if (!stale) throw new Error('아직 차례를 넘길 수 없다.');
 
       turnsTaken += 1;
       updateActorPublic({ turnsTaken });
@@ -512,6 +512,6 @@ export async function txMove({
       return;
     }
 
-    throw new Error('알 수 없는 행동이다.');
+    throw new Error('처리할 수 없는 행동이다.');
   });
 }
