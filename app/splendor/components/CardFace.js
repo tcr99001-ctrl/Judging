@@ -38,7 +38,7 @@ export default function CardFace({
       className={[
         'relative flex h-full min-h-[186px] flex-col overflow-hidden rounded-[22px] border shadow-[0_18px_32px_rgba(10,7,6,0.26)]',
         TIER_FRAME[card.tier] || TIER_FRAME[1],
-        compact ? 'min-h-[132px] rounded-[18px]' : '',
+        compact ? 'min-h-[136px] rounded-[18px]' : '',
         emphasis ? 'ring-2 ring-[#8a4636]/40' : '',
         className,
       ].join(' ')}
@@ -75,24 +75,17 @@ export default function CardFace({
               제거 {directiveCount}
             </span>
           ) : null}
-          {card.unlockWitnesses?.length ? (
-            <span className="rounded-full border border-[#203142]/20 bg-[#203142]/10 px-2 py-1 text-[10px] font-black text-[#203142]">
-              인물 {card.unlockWitnesses.length}
-            </span>
-          ) : null}
         </div>
 
-        <p className={[compact ? 'text-[11px]' : 'text-[12px]', 'line-clamp-3 font-bold leading-5 text-[#3b322b]'].join(' ')}>{card.summary}</p>
+        <p className={[compact ? 'text-[11px] line-clamp-3' : 'text-[12px] line-clamp-4', 'font-bold leading-5 text-[#3b322b]'].join(' ')}>{card.summary}</p>
 
         <div className="mt-2">
           <AssetImage src={UI_ASSET.scratchDivider} className="h-4 w-full object-cover opacity-75" />
         </div>
 
-        <div className="mt-1 line-clamp-2 text-[11px] font-black leading-5 text-[#6a5647]">{card.quote}</div>
-
         <div className="mt-auto pt-3">
           <div className="flex flex-wrap gap-1.5">
-            {(card.threads || []).slice(0, compact ? 2 : 3).map((thread) => (
+            {(card.threads || []).slice(0, compact ? 2 : 4).map((thread) => (
               <span key={thread} className="rounded-full border border-[#4b3a31]/18 bg-[#f7f0e3]/62 px-2 py-1 text-[10px] font-black text-[#4b3a31]">
                 {thread}
               </span>

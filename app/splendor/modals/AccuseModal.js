@@ -51,8 +51,8 @@ export default function AccuseModal({ open, myData, roomData, onClose, onSubmit 
       <div className="panel modal-panel max-w-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-start justify-between border-b border-white/10 px-4 py-4">
           <div>
-            <div className="text-[11px] font-black tracking-[0.18em] text-slate-400">최종 고발</div>
-            <div className="mt-1 text-lg font-black text-white">범인, 동기, 수법</div>
+            <div className="text-[11px] font-black tracking-[0.18em] text-slate-400">고발</div>
+            <div className="mt-1 text-lg font-black text-white">대상 선택</div>
           </div>
           <button type="button" onClick={onClose} className="tap-feedback rounded-2xl border border-white/10 bg-slate-900/55 p-2 text-slate-200">
             <X size={16} />
@@ -75,14 +75,14 @@ export default function AccuseModal({ open, myData, roomData, onClose, onSubmit 
             </div>
           </div>
 
-          <ChoiceGroup title="범인" items={SUSPECTS} activeId={culpritId} onPick={setCulpritId} formatter={(item) => item.name} />
+          <ChoiceGroup title="용의자" items={SUSPECTS} activeId={culpritId} onPick={setCulpritId} formatter={(item) => item.name} />
           <ChoiceGroup title="동기" items={MOTIVES} activeId={motiveId} onPick={setMotiveId} />
           <ChoiceGroup title="수법" items={METHODS} activeId={methodId} onPick={setMethodId} />
         </div>
 
         <div className="grid gap-2 border-t border-white/10 px-4 py-4 sm:grid-cols-[1fr_auto]">
           <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-slate-900/46 px-4 py-3 text-sm font-bold text-slate-300">
-            <AlertTriangle size={15} className="text-amber-200" /> 틀리면 봉인된다.
+            <AlertTriangle size={15} className="text-amber-200" /> 틀리면 다시 고발할 수 없다.
           </div>
           <button
             type="button"

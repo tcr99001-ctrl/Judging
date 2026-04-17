@@ -26,8 +26,8 @@ export function isPlayerStaleFromPresence({ player, roomPresenceAt, staleMs = ST
 }
 
 export function getDisplayName(player) {
-  if (!player) return '수사관';
-  return player.name || String(player.id || '수사관').slice(0, 6);
+  if (!player) return '참가자';
+  return player.name || String(player.id || '참가자').slice(0, 6);
 }
 
 export function makeDeckPlaceholders(value) {

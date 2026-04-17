@@ -214,8 +214,10 @@ export default function PageInner() {
 
   if (!ready) {
     return (
-      <div className="app-shell game-surface flex min-h-screen items-center justify-center px-4">
-        <div className="panel px-5 py-5 text-center text-sm font-black text-slate-200">사건 파일을 여는 중</div>
+      <div className="app-shell game-surface px-4 py-6">
+        <div className="mx-auto w-full max-w-[480px]">
+          <div className="panel px-5 py-5 text-center text-sm font-black text-slate-200">불러오는 중</div>
+        </div>
       </div>
     );
   }
@@ -243,7 +245,7 @@ export default function PageInner() {
 
   return (
     <div className="app-shell game-surface">
-      <div className="mx-auto min-h-screen w-full max-w-[480px] px-3 pb-[calc(18rem+var(--safe-bottom))] pt-3">
+      <div className="mx-auto min-h-screen w-full max-w-[480px] px-3 pb-[calc(1.5rem+var(--safe-bottom))] pt-3">
         <div className="grid gap-4">
           <GameHeader
             roomData={roomData}
@@ -269,21 +271,21 @@ export default function PageInner() {
             leads={myData?.reservedLeads || []}
             onOpenCard={openCard}
           />
+
+              <Dashboard
+            myData={myData || {}}
+            roomData={roomData}
+            isMyTurn={isMyTurn}
+            actionUsed={actionUsed}
+            canForceStaleSkip={canForceStaleSkip}
+            onOpenLeadManager={() => setLeadManagerOpen(true)}
+            onOpenCrosscheck={() => setCrosscheckOpen(true)}
+            onOpenAccuse={() => setShowAccuse(true)}
+            onEndTurn={handleEndTurn}
+            onForceStaleSkip={handleForceStaleSkip}
+          />
         </div>
       </div>
-
-      <Dashboard
-        myData={myData || {}}
-        roomData={roomData}
-        isMyTurn={isMyTurn}
-        actionUsed={actionUsed}
-        canForceStaleSkip={canForceStaleSkip}
-        onOpenLeadManager={() => setLeadManagerOpen(true)}
-        onOpenCrosscheck={() => setCrosscheckOpen(true)}
-        onOpenAccuse={() => setShowAccuse(true)}
-        onEndTurn={handleEndTurn}
-        onForceStaleSkip={handleForceStaleSkip}
-      />
 
       <CardModal
         open={!!activeCard}

@@ -2,7 +2,7 @@ export const COLORS = ['white', 'blue', 'green', 'red', 'black'];
 export const ALL = [...COLORS, 'gold'];
 
 export const CASE_TITLE = '가면 경매장의 마지막 증언';
-export const CASE_TAGLINE = '경매는 멈췄다. 왕관은 사라졌다.';
+export const CASE_TAGLINE = '전시장 안에서 살인이 났다. 왕관도 사라졌다.';
 
 export const TIER_LABEL = {
   1: '현장',

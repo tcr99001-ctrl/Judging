@@ -13,8 +13,8 @@ export default function BeginnerGuide({ open, onClose }) {
       <div className="panel modal-panel max-w-lg" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-start justify-between border-b border-white/10 px-4 py-4">
           <div>
-            <div className="text-[11px] font-black tracking-[0.18em] text-slate-400">브리핑</div>
-            <div className="mt-1 text-lg font-black text-white">{CASE_BRIEFING.join(' ')}</div>
+            <div className="text-[11px] font-black tracking-[0.18em] text-slate-400">기본 규칙</div>
+            <div className="mt-1 break-words text-lg font-black text-white">{CASE_BRIEFING.join(' ')}</div>
           </div>
           <button type="button" onClick={onClose} className="tap-feedback rounded-2xl border border-white/10 bg-slate-900/55 p-2 text-slate-200">
             <X size={16} />
@@ -25,7 +25,7 @@ export default function BeginnerGuide({ open, onClose }) {
           {GUIDE_STEPS.map((step) => (
             <div key={step.title} className="rounded-3xl border border-white/10 bg-slate-950/44 px-4 py-4">
               <div className="text-sm font-black text-white">{step.title}</div>
-              <div className="mt-2 text-sm font-bold text-slate-300">{step.body}</div>
+              <div className="mt-2 text-sm font-bold text-slate-300 break-words">{step.body}</div>
             </div>
           ))}
         </div>

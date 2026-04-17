@@ -16,7 +16,7 @@ export default function CardModal({
 }) {
   if (!open || !card) return null;
 
-  const actionLabel = source === 'reserved' ? '리드 해제' : '리드 고정';
+  const actionLabel = source === 'reserved' ? '고정 해제' : '리드 고정';
 
   return (
     <div className="modal-layer">
@@ -24,8 +24,8 @@ export default function CardModal({
       <div className="panel modal-panel max-w-xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-start justify-between border-b border-white/10 px-4 py-4">
           <div>
-            <div className="text-[11px] font-black tracking-[0.18em] text-slate-400">단서</div>
-            <div className="mt-1 text-lg font-black text-white">{card.title}</div>
+            <div className="text-[11px] font-black tracking-[0.18em] text-slate-400">단서 정보</div>
+            <div className="mt-1 break-words text-lg font-black text-white">{card.title}</div>
           </div>
           <button type="button" onClick={onClose} className="tap-feedback rounded-2xl border border-white/10 bg-slate-900/55 p-2 text-slate-200">
             <X size={16} />
@@ -37,19 +37,13 @@ export default function CardModal({
             <CardFace card={card} />
           </div>
 
-          <div className="rounded-3xl border border-white/10 bg-slate-950/44 px-4 py-4 text-sm font-bold leading-6 text-slate-200">
+          <div className="rounded-3xl border border-white/10 bg-slate-950/44 px-4 py-4 text-sm font-bold leading-6 text-slate-200 break-words">
             {card.detail}
           </div>
 
-          {card.quote ? (
-            <div className="rounded-3xl border border-white/10 bg-slate-950/44 px-4 py-4 text-sm font-bold italic leading-6 text-slate-300">
-              {card.quote}
-            </div>
-          ) : null}
-
           {(card.threads || []).length ? (
             <div className="rounded-3xl border border-white/10 bg-slate-950/44 px-4 py-4">
-              <div className="text-[11px] font-black tracking-[0.16em] text-slate-400">실마리</div>
+              <div className="text-[11px] font-black tracking-[0.16em] text-slate-400">키워드</div>
               <div className="mt-3 flex flex-wrap gap-2">
                 {card.threads.map((thread) => (
                   <span key={thread} className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-sm font-black text-white">
@@ -62,10 +56,10 @@ export default function CardModal({
 
           {card.directiveLines?.length ? (
             <div className="rounded-3xl border border-white/10 bg-slate-950/44 px-4 py-4">
-              <div className="text-[11px] font-black tracking-[0.16em] text-slate-400">대조 결과</div>
+              <div className="text-[11px] font-black tracking-[0.16em] text-slate-400">대조 시 반영</div>
               <div className="mt-3 grid gap-2 text-sm font-bold text-slate-200">
                 {card.directiveLines.map((line) => (
-                  <div key={line} className="rounded-2xl border border-white/8 bg-white/5 px-3 py-2">
+                  <div key={line} className="rounded-2xl border border-white/8 bg-white/5 px-3 py-2 break-words">
                     {line}
                   </div>
                 ))}
@@ -82,7 +76,7 @@ export default function CardModal({
               disabled={!canTake}
               className="tap-feedback min-h-12 rounded-2xl border border-emerald-300/25 bg-emerald-500/12 px-4 py-3 text-sm font-black text-emerald-50 disabled:border-slate-800 disabled:bg-slate-950 disabled:text-slate-500"
             >
-              <span className="inline-flex items-center gap-2"><Search size={15} /> 확보</span>
+              <span className="inline-flex items-center gap-2 whitespace-normal"><Search size={15} /> 단서 확보</span>
             </button>
           ) : (
             <button
@@ -91,7 +85,7 @@ export default function CardModal({
               disabled={!canToggleLead}
               className="tap-feedback min-h-12 rounded-2xl border border-amber-300/25 bg-amber-500/12 px-4 py-3 text-sm font-black text-amber-50 disabled:border-slate-800 disabled:bg-slate-950 disabled:text-slate-500"
             >
-              <span className="inline-flex items-center gap-2">{source === 'reserved' ? <PinOff size={15} /> : <FilePlus2 size={15} />}{actionLabel}</span>
+              <span className="inline-flex items-center gap-2 whitespace-normal">{source === 'reserved' ? <PinOff size={15} /> : <FilePlus2 size={15} />}{actionLabel}</span>
             </button>
           )}
 

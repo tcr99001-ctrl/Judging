@@ -39,7 +39,7 @@ export default function GemModal({ open, myData, onClose, onConfirm }) {
         <div className="flex items-start justify-between border-b border-white/10 px-4 py-4">
           <div>
             <div className="text-[11px] font-black tracking-[0.18em] text-slate-400">기록 대조</div>
-            <div className="mt-1 text-lg font-black text-white">겹치는 두 장</div>
+            <div className="mt-1 text-lg font-black text-white">단서 두 장 선택</div>
           </div>
           <button type="button" onClick={onClose} className="tap-feedback rounded-2xl border border-white/10 bg-slate-900/55 p-2 text-slate-200">
             <X size={16} />
@@ -48,16 +48,16 @@ export default function GemModal({ open, myData, onClose, onConfirm }) {
 
         <div className="grid gap-4 px-4 py-4">
           {selectedPair ? (
-            <div className="rounded-3xl border border-emerald-300/20 bg-emerald-500/10 px-4 py-4 text-sm font-bold text-emerald-50">
-              {selectedPair.sharedThreads.join(' · ')}
+            <div className="rounded-3xl border border-emerald-300/20 bg-emerald-500/10 px-4 py-4 text-sm font-bold text-emerald-50 break-words">
+              공통 키워드: {selectedPair.sharedThreads.join(' · ')}
             </div>
           ) : (
             <div className="rounded-3xl border border-white/10 bg-slate-950/44 px-4 py-4 text-sm font-bold text-slate-300">
-              겹치는 실마리가 있는 둘을 고르면 된다.
+              같은 키워드가 있는 두 장을 고른다.
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {clues.map((card) => {
               const active = selected.includes(card.id);
               const selectable = selected.length < 2 || active;
@@ -82,7 +82,7 @@ export default function GemModal({ open, myData, onClose, onConfirm }) {
             disabled={!selectedPair}
             className="tap-feedback min-h-12 rounded-2xl border border-emerald-300/25 bg-emerald-500/12 px-4 py-3 text-sm font-black text-emerald-50 disabled:border-slate-800 disabled:bg-slate-950 disabled:text-slate-500"
           >
-            <span className="inline-flex items-center gap-2"><Crosshair size={15} /> 대조</span>
+            <span className="inline-flex items-center gap-2 whitespace-normal"><Crosshair size={15} /> 대조</span>
           </button>
           <button
             type="button"

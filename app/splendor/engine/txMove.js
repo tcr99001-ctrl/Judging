@@ -330,13 +330,13 @@ export async function txMove({
 
       if (isLeadPinned({ reservedLeads }, clueId)) {
         reservedLeads = reservedLeads.filter((card) => card.id !== clueId);
-        notebook = applyNotebookEffect(notebook, {}, '리드를 내렸다.');
+        notebook = applyNotebookEffect(notebook, {}, '리드 해제');
       } else {
         const clue = privateClues.find((card) => card.id === clueId);
         if (!clue) throw new Error('내 단서만 세울 수 있다.');
         if (reservedLeads.length >= MAX_RESERVED) throw new Error('리드는 셋까지다.');
         reservedLeads.push(deepClone(clue));
-        notebook = applyNotebookEffect(notebook, {}, `${clue.title} 리드 고정`);
+        notebook = applyNotebookEffect(notebook, {}, `${clue.title} 고정`);
       }
 
       updateActorPublic();
@@ -356,7 +356,7 @@ export async function txMove({
       if (!cardA || !cardB) throw new Error('대조할 단서가 없다.');
 
       const shared = getSharedThreads(cardA, cardB);
-      if (!shared.length) throw new Error('겹치는 실마리가 없다.');
+      if (!shared.length) throw new Error('겹치는 키워드가 없다.');
       const key = pairKey(aId, bId);
       if (crosscheckPairs.includes(key)) throw new Error('이미 묶은 조합이다.');
 
@@ -367,7 +367,7 @@ export async function txMove({
         eliminateMethods: [...(cardA.directives?.eliminateMethods || []), ...(cardB.directives?.eliminateMethods || [])],
       };
       const sharedLabel = shared.join(' · ');
-      const effectText = summarizeNotebookEffect(combined).join(' / ') || '허탕';
+      const effectText = summarizeNotebookEffect(combined).join(' / ') || '새 내용 없음';
       notebook = applyNotebookEffect(notebook, combined, `${cardA.title} ↔ ${cardB.title} · ${sharedLabel} · ${effectText}`);
       breakthroughs += 1;
       caseProgress += 1;
@@ -392,7 +392,7 @@ export async function txMove({
       notebook = applyNotebookEffect(
         notebook,
         witness.effect,
-        `${witness.title} · ${summarizeNotebookEffect(witness.effect).join(' / ') || '입을 열었다.'}`
+        `${witness.title} · ${summarizeNotebookEffect(witness.effect).join(' / ') || '진술 확보'}`
       );
       witnessCount += 1;
       breakthroughs += 1;
@@ -438,7 +438,7 @@ export async function txMove({
 
       accusationLocked = true;
       caseProgress = Math.max(0, caseProgress - 1);
-      notebook = applyNotebookEffect(notebook, {}, '성급한 고발이었다.');
+      notebook = applyNotebookEffect(notebook, {}, '고발 실패');
       updateActorPublic();
       updateActorPrivate();
       setRoom({ actionLock: { turnIndex, playerId: actorId, used: true }, pending: null });
